@@ -101,6 +101,17 @@
 
       formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixfmt-rfc-style);
 
+      checks = forEachSystem (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          # Build + run tests (cargo test via cargoCheckHook)
+          ratty = self.packages.${system}.ratty;
+        }
+      );
+
       # Home Manager module — declarative user-level config
       #
       # Usage in home.nix:
