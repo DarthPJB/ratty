@@ -6,7 +6,6 @@
   stdenv,
   rustPlatform,
   pkg-config,
-  alsa-lib,
   fontconfig,
   udev,
   wayland,
@@ -97,7 +96,6 @@ rustPlatform.buildRustPackage rec {
 
   buildInputs =
     lib.optionals stdenv.isLinux [
-      alsa-lib
       fontconfig
       udev
       wayland

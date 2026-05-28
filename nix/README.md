@@ -2,16 +2,23 @@
 
 This flake provides a Nix package for [ratty](https://github.com/orhun/ratty), a GPU-rendered terminal emulator with inline 3D graphics.
 
+## Supported Systems
+
+- `x86_64-linux`
+- `aarch64-linux`
+- `x86_64-darwin`
+- `aarch64-darwin`
+
 ## Quick Start
 
 ### Direct usage
 
 ```bash
 # Run directly
-nix run github:DarthPJB/ratty
+nix run github:orhun/ratty
 
 # Install to profile
-nix profile install github:DarthPJB/ratty
+nix profile install github:orhun/ratty
 ```
 
 ### As a flake input
@@ -20,7 +27,7 @@ nix profile install github:DarthPJB/ratty
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    ratty.url = "github:DarthPJB/ratty";
+    ratty.url = "github:orhun/ratty";
   };
 
   outputs = { nixpkgs, ratty, ... }: {
@@ -38,7 +45,7 @@ Add ratty to your system packages with optional declarative configuration:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    ratty.url = "github:DarthPJB/ratty";
+    ratty.url = "github:orhun/ratty";
   };
 
   outputs = { nixpkgs, ratty, ... }: {
@@ -78,8 +85,8 @@ Add ratty to your system packages with optional declarative configuration:
 
 This will:
 - Install the ratty package
-- Write configuration to `/etc/ratty/ratty.toml`
-- Wrap the binary to use `--config-file /etc/ratty/ratty.toml`
+- Write configuration to `/etc/ratty/ratty.toml` (only when `settings` is non-empty)
+- Wrap the binary to use `--config-file /etc/ratty/ratty.toml` (only when `settings` is non-empty)
 
 ## Home Manager Configuration
 
@@ -91,7 +98,7 @@ For user-level configuration without root:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    ratty.url = "github:DarthPJB/ratty";
+    ratty.url = "github:orhun/ratty";
   };
 
   outputs = { nixpkgs, home-manager, ratty, ... }: {
@@ -129,7 +136,7 @@ For user-level configuration without root:
 
 This will:
 - Install the ratty package to your user profile
-- Write configuration to `$XDG_CONFIG_HOME/ratty/ratty.toml` (typically `~/.config/ratty/ratty.toml`)
+- Write configuration to `$XDG_CONFIG_HOME/ratty/ratty.toml` (typically `~/.config/ratty/ratty.toml`) (only when `settings` is non-empty)
 - ratty discovers this path automatically
 
 ## Module Options
@@ -160,8 +167,8 @@ nix develop
 # Build package
 nix build
 
-# Run tests
-nix build .#ratty --check
+# Run with checks
+nix flake check
 ```
 
 ## Maintainer
