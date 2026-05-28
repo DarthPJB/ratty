@@ -22,7 +22,10 @@
   bash,
   writeShellScript,
   makeWrapper,
-  darwin,
+  copyDesktopItems,
+  makeDesktopItem,
+  # Darwin frameworks — passed via callPackage override from flake
+  darwinFrameworks ? [ ],
 }:
 
 let
@@ -30,9 +33,14 @@ let
     lib.optionals stdenv.isLinux [
       vulkan-loader
       mesa
+      fontconfig
       libxkbcommon
       libx11
       libxcb
+      libxcursor
+      libxi
+      libxrandr
+      libxext
     ]
   );
 
@@ -45,6 +53,10 @@ let
   rattyWrapper = writeShellScript "ratty" ''
     export SHELL='${bash}/bin/bash'
     export LD_LIBRARY_PATH='${runtimeLibraryPath}'"''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    ${lib.optionalString stdenv.isDarwin ''
+      export DYLD_LIBRARY_PATH='${runtimeLibraryPath}'"''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+      export DYLD_FALLBACK_LIBRARY_PATH='${runtimeLibraryPath}'"''${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+    ''}
     for _arg in "$@"; do
       if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
         exec @out@/bin/.ratty-unwrapped "$@"
@@ -64,6 +76,23 @@ rustPlatform.buildRustPackage rec {
   nativeBuildInputs = [
     pkg-config
     makeWrapper
+    copyDesktopItems
+  ];
+
+  desktopItems = [
+    (makeDesktopItem {
+      name = "ratty";
+      desktopName = "Ratty";
+      comment = "A GPU-rendered terminal emulator with inline 3D graphics";
+      exec = "ratty";
+      terminal = false;
+      categories = [
+        "System"
+        "TerminalEmulator"
+        "Utility"
+      ];
+      icon = "ratty";
+    })
   ];
 
   buildInputs =
@@ -82,19 +111,7 @@ rustPlatform.buildRustPackage rec {
       vulkan-loader
       mesa
     ]
-    ++ lib.optionals stdenv.isDarwin (
-      with darwin.apple_sdk.frameworks;
-      [
-        Cocoa
-        CoreFoundation
-        CoreGraphics
-        CoreText
-        CoreVideo
-        Metal
-        QuartzCore
-        libiconv
-      ]
-    );
+    ++ darwinFrameworks;
 
   # Assets are embedded at compile time via rust-embed.
   # Copy them to $out/share for reference and custom model discovery fallback.
@@ -102,6 +119,8 @@ rustPlatform.buildRustPackage rec {
     mkdir -p $out/share/ratty
     cp -r assets/objects $out/share/ratty/
     install -Dm644 config/ratty.toml $out/share/ratty/ratty.toml
+    install -Dm644 website/assets/images/ratty-logo.png \
+      $out/share/icons/hicolor/512x512/apps/ratty.png
 
     # Install wrapper script
     mv $out/bin/ratty $out/bin/.ratty-unwrapped
@@ -113,7 +132,7 @@ rustPlatform.buildRustPackage rec {
     description = "GPU-rendered terminal emulator with inline 3D graphics";
     homepage = "https://github.com/orhun/ratty";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [ ];
+    maintainers = [ "daniejbolt" ];
     mainProgram = "ratty";
     platforms = lib.platforms.unix;
   };
