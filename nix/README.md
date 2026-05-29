@@ -167,7 +167,7 @@ nix develop
 # Build package
 nix build
 
-# Run with checks
+# Run checks (build + tests)
 nix flake check
 ```
 
