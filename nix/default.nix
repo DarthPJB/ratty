@@ -121,10 +121,10 @@ rustPlatform.buildRustPackage rec {
       --run '''
         for _arg in "$@"; do
           if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
-            exec ${placeholder "out"}/bin/.ratty-env-wrapped "$@"
+            exec '''$out'''/bin/.ratty-env-wrapped "$@"
           fi
         done
-        exec ${placeholder "out"}/bin/.ratty-env-wrapped -e "${bash}/bin/bash" "$@"
+        exec '''$out'''/bin/.ratty-env-wrapped -e "'''${bash}'''/bin/bash" "$@"
       '''
   '';
 
