@@ -142,7 +142,7 @@ craneLib.buildPackage (commonArgs // {
     # the nested double-tick problem (Nix does not support nested double-tick strings).
     mv $out/bin/ratty $out/bin/.ratty-env-wrapped
     makeWrapper $out/bin/.ratty-env-wrapped $out/bin/ratty \
-      --run "${runScript}"
+      --run '${runScript}'
   '';
 
   meta = {
