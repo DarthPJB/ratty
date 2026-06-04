@@ -19,7 +19,6 @@
   vulkan-loader,
   mesa,
   bash,
-  writeShellScript,
   makeWrapper,
   copyDesktopItems,
   makeDesktopItem,
@@ -43,26 +42,6 @@ let
     ]
   );
 
-  # Wrapper that ensures a working shell on NixOS.
-  # ratty resolves shell as: config.shell.program → $SHELL → /bin/bash.
-  # A config/ratty.toml in CWD (e.g. the upstream repo) may hardcode
-  # program = "/bin/bash" which does not exist on NixOS.  When no
-  # -e/--command flag is given the wrapper injects -e "$SHELL", bypassing
-  # the config entirely.
-  rattyWrapper = writeShellScript "ratty" ''
-    export SHELL='${bash}/bin/bash'
-    export LD_LIBRARY_PATH='${runtimeLibraryPath}'"''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    ${lib.optionalString stdenv.isDarwin ''
-      export DYLD_LIBRARY_PATH='${runtimeLibraryPath}'"''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-      export DYLD_FALLBACK_LIBRARY_PATH='${runtimeLibraryPath}'"''${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
-    ''}
-    for _arg in "$@"; do
-      if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
-        exec @out@/bin/.ratty-unwrapped "$@"
-      fi
-    done
-    exec @out@/bin/.ratty-unwrapped -e "$SHELL" "$@"
-  '';
 in
 rustPlatform.buildRustPackage rec {
   pname = "ratty";
@@ -120,10 +99,33 @@ rustPlatform.buildRustPackage rec {
     install -Dm644 website/assets/images/ratty-logo.png \
       $out/share/icons/hicolor/512x512/apps/ratty.png
 
-    # Install wrapper script
-    mv $out/bin/ratty $out/bin/.ratty-unwrapped
-    install -Dm755 ${rattyWrapper} $out/bin/ratty
-    substituteInPlace $out/bin/ratty --subst-var-by out $out
+    # Use wrapProgram for env var management (idiomatic nixpkgs).
+    # Handles SHELL, LD_LIBRARY_PATH, and Darwin DYLD_* paths.
+    wrapProgram $out/bin/ratty \
+      --set SHELL '${bash}/bin/bash' \
+      --prefix LD_LIBRARY_PATH : '${runtimeLibraryPath}' \
+      ${lib.optionalString stdenv.isDarwin ''
+        --prefix DYLD_LIBRARY_PATH : '${runtimeLibraryPath}' \
+        --prefix DYLD_FALLBACK_LIBRARY_PATH : '${runtimeLibraryPath}' \
+      ''}
+
+    # Thin wrapper for conditional -e "$SHELL" injection.
+    # ratty resolves shell as: config.shell.program → $SHELL → /bin/bash.
+    # A config/ratty.toml in CWD may hardcode "/bin/bash" which does not
+    # exist on NixOS.  When no -e/--command flag is given, inject
+    # -e "$SHELL" to bypass any stale CWD config.
+    # NOTE: cannot use --add-flags unconditionally because clap's
+    # num_args=1.. would treat a second -e as a command argument.
+    mv $out/bin/ratty $out/bin/.ratty-env-wrapped
+    makeWrapper $out/bin/.ratty-env-wrapped $out/bin/ratty \
+      --run '''
+        for _arg in "$@"; do
+          if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
+            exec ${placeholder "out"}/bin/.ratty-env-wrapped "$@"
+          fi
+        done
+        exec ${placeholder "out"}/bin/.ratty-env-wrapped -e "${bash}/bin/bash" "$@"
+      '''
   '';
 
   meta = {
