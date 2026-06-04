@@ -4,7 +4,7 @@
 {
   lib,
   stdenv,
-  rustPlatform,
+  craneLib,
   pkg-config,
   fontconfig,
   udev,
@@ -42,20 +42,54 @@ let
     ]
   );
 
+  # Common arguments shared between buildDepsOnly and buildPackage.
+  # buildDepsOnly uses a filtered source (only cargo files) to maximize
+  # cache hit rate — dependency hashes don't change when assets/docs change.
+  commonArgs = {
+    pname = "ratty";
+    version = "0.4.1";
+
+    src = craneLib.cleanCargoSource ../.;
+
+    nativeBuildInputs = [
+      pkg-config
+      makeWrapper
+      copyDesktopItems
+    ];
+
+    buildInputs =
+      lib.optionals stdenv.isLinux [
+        fontconfig
+        udev
+        wayland
+        libxkbcommon
+        libxcb
+        libx11
+        libxcursor
+        libxi
+        libxrandr
+        libxext
+        vulkan-loader
+        mesa
+      ]
+      ++ darwinFrameworks;
+
+    cargoLock = ../Cargo.lock;
+  };
+
+  # Build only the dependencies — this is the key caching layer.
+  # Subsequent builds reuse these artifacts as long as Cargo.lock
+  # and dependency code remain unchanged.
+  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
 in
-rustPlatform.buildRustPackage rec {
-  pname = "ratty";
-  version = "0.3.0";
+# Build the full package, reusing cached dependency artifacts.
+craneLib.buildPackage (commonArgs // {
+  inherit cargoArtifacts;
 
+  # The full source (including assets, config, website) is needed for
+  # postInstall below.  buildDepsOnly already handled the filtered source.
   src = ../.;
-
-  cargoLock.lockFile = ../Cargo.lock;
-
-  nativeBuildInputs = [
-    pkg-config
-    makeWrapper
-    copyDesktopItems
-  ];
 
   desktopItems = [
     (makeDesktopItem {
@@ -73,34 +107,17 @@ rustPlatform.buildRustPackage rec {
     })
   ];
 
-  buildInputs =
-    lib.optionals stdenv.isLinux [
-      fontconfig
-      udev
-      wayland
-      libxkbcommon
-      libxcb
-      libx11
-      libxcursor
-      libxi
-      libxrandr
-      libxext
-      vulkan-loader
-      mesa
-    ]
-    ++ darwinFrameworks;
-
   # Assets are embedded at compile time via rust-embed.
   # Copy them to $out/share for reference and custom model discovery fallback.
   postInstall = ''
+    # Step 1: Copy assets
     mkdir -p $out/share/ratty
     cp -r assets/objects $out/share/ratty/
     install -Dm644 config/ratty.toml $out/share/ratty/ratty.toml
     install -Dm644 website/assets/images/ratty-logo.png \
       $out/share/icons/hicolor/512x512/apps/ratty.png
 
-    # Use wrapProgram for env var management (idiomatic nixpkgs).
-    # Handles SHELL, LD_LIBRARY_PATH, and Darwin DYLD_* paths.
+    # Step 2: wrapProgram for env var management
     wrapProgram $out/bin/ratty \
       --set SHELL '${bash}/bin/bash' \
       --prefix LD_LIBRARY_PATH : '${runtimeLibraryPath}' \
@@ -109,13 +126,7 @@ rustPlatform.buildRustPackage rec {
         --prefix DYLD_FALLBACK_LIBRARY_PATH : '${runtimeLibraryPath}' \
       ''}
 
-    # Thin wrapper for conditional -e "$SHELL" injection.
-    # ratty resolves shell as: config.shell.program → $SHELL → /bin/bash.
-    # A config/ratty.toml in CWD may hardcode "/bin/bash" which does not
-    # exist on NixOS.  When no -e/--command flag is given, inject
-    # -e "$SHELL" to bypass any stale CWD config.
-    # NOTE: cannot use --add-flags unconditionally because clap's
-    # num_args=1.. would treat a second -e as a command argument.
+    # Step 3: Thin wrapper for conditional -e "$SHELL" injection
     mv $out/bin/ratty $out/bin/.ratty-env-wrapped
     makeWrapper $out/bin/.ratty-env-wrapped $out/bin/ratty \
       --run '''
@@ -136,4 +147,4 @@ rustPlatform.buildRustPackage rec {
     mainProgram = "ratty";
     platforms = lib.platforms.unix;
   };
-}
+})

@@ -1,10 +1,13 @@
 {
   description = "Ratty: a GPU-rendered terminal emulator with inline 3D graphics";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    crane.url = "github:ipetkov/crane";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, crane }:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -60,9 +63,11 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          craneLib = crane.mkLib pkgs;
         in
         {
           ratty = pkgs.callPackage ./nix/default.nix {
+            inherit craneLib;
             # Pass Darwin frameworks when on Darwin
             darwinFrameworks = pkgs.lib.optionals pkgs.stdenv.isDarwin (
               with pkgs.darwin.apple_sdk.frameworks;
