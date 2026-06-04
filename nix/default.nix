@@ -129,14 +129,14 @@ craneLib.buildPackage (commonArgs // {
     # Step 3: Thin wrapper for conditional -e "$SHELL" injection
     mv $out/bin/ratty $out/bin/.ratty-env-wrapped
     makeWrapper $out/bin/.ratty-env-wrapped $out/bin/ratty \
-      --run '''
+      --run ''
         for _arg in "$@"; do
           if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
-            exec '''$out'''/bin/.ratty-env-wrapped "$@"
+            exec ${placeholder "out"}/bin/.ratty-env-wrapped "$@"
           fi
         done
-        exec '''$out'''/bin/.ratty-env-wrapped -e "'''${bash}'''/bin/bash" "$@"
-      '''
+        exec ${placeholder "out"}/bin/.ratty-env-wrapped -e "${bash}/bin/bash" "$@"
+      ''
   '';
 
   meta = {
