@@ -42,6 +42,17 @@ let
     ]
   );
 
+  # Shell script injected into the wrapper's --run argument.
+  # Defined here to avoid nested ''…'' string issues in postInstall.
+  runScript = ''
+    for _arg in "$@"; do
+      if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
+        exec ${placeholder "out"}/bin/.ratty-env-wrapped "$@"
+      fi
+    done
+    exec ${placeholder "out"}/bin/.ratty-env-wrapped -e "${bash}/bin/bash" "$@"
+  '';
+
   # Common arguments shared between buildDepsOnly and buildPackage.
   # buildDepsOnly uses a filtered source (only cargo files) to maximize
   # cache hit rate — dependency hashes don't change when assets/docs change.
@@ -126,17 +137,12 @@ craneLib.buildPackage (commonArgs // {
         --prefix DYLD_FALLBACK_LIBRARY_PATH : '${runtimeLibraryPath}' \
       ''}
 
-    # Step 3: Thin wrapper for conditional -e "$SHELL" injection
+    # Step 3: Thin wrapper for conditional -e "$SHELL" injection.
+    # The --run script is defined as a separate Nix string to avoid
+    # the nested double-tick problem (Nix does not support nested double-tick strings).
     mv $out/bin/ratty $out/bin/.ratty-env-wrapped
     makeWrapper $out/bin/.ratty-env-wrapped $out/bin/ratty \
-      --run ''
-        for _arg in "$@"; do
-          if [ "$_arg" = "-e" ] || [ "$_arg" = "--command" ]; then
-            exec ${placeholder "out"}/bin/.ratty-env-wrapped "$@"
-          fi
-        done
-        exec ${placeholder "out"}/bin/.ratty-env-wrapped -e "${bash}/bin/bash" "$@"
-      ''
+      --run "${runScript}"
   '';
 
   meta = {
