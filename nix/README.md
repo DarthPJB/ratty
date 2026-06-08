@@ -84,6 +84,7 @@ Add ratty to your system packages with optional declarative configuration:
 ```
 
 This will:
+
 - Install the ratty package
 - Write configuration to `/etc/ratty/ratty.toml` (only when `settings` is non-empty)
 - Wrap the binary to use `--config-file /etc/ratty/ratty.toml` (only when `settings` is non-empty)
@@ -135,6 +136,7 @@ For user-level configuration without root:
 ```
 
 This will:
+
 - Install the ratty package to your user profile
 - Write configuration to `$XDG_CONFIG_HOME/ratty/ratty.toml` (typically `~/.config/ratty/ratty.toml`) (only when `settings` is non-empty)
 - ratty discovers this path automatically
@@ -143,11 +145,11 @@ This will:
 
 Both `nixosModules.default` and `homeManagerModules.default` expose:
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `programs.ratty.enable` | bool | `false` | Enable ratty installation |
-| `programs.ratty.package` | package | `self.packages.<system>.ratty` | The ratty package to use |
-| `programs.ratty.settings` | attrset | `{}` | Configuration written to `ratty.toml` |
+| Option                    | Type    | Default                        | Description                           |
+| ------------------------- | ------- | ------------------------------ | ------------------------------------- |
+| `programs.ratty.enable`   | bool    | `false`                        | Enable ratty installation             |
+| `programs.ratty.package`  | package | `self.packages.<system>.ratty` | The ratty package to use              |
+| `programs.ratty.settings` | attrset | `{}`                           | Configuration written to `ratty.toml` |
 
 ## Package Architecture
 
