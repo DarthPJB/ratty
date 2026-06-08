@@ -59,6 +59,14 @@ cargo install ratty
 sudo pacman -S ratty
 ```
 
+### [Nix](nix/README.md)
+
+See the [Nix packaging docs](nix/README.md) for flake, NixOS, and Home Manager usage.
+
+```bash
+nix run github:orhun/ratty
+```
+
 ### Binary releases
 
 Prebuilt binaries are available on the [GitHub releases page](https://github.com/orhun/ratty/releases) for direct download.
