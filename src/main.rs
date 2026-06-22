@@ -4,6 +4,8 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{WgpuSettings, WgpuSettingsPriority};
 use bevy::window::{PrimaryWindow, WindowCreated, WindowResolution};
 use bevy::winit::{UpdateMode, WINIT_WINDOWS, WinitSettings};
 use clap::Parser;
@@ -81,6 +83,15 @@ fn main() -> anyhow::Result<()> {
                 })
                 .set(AssetPlugin {
                     file_path: asset_root.to_string_lossy().into_owned(),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: bevy::render::settings::RenderCreation::Automatic(
+                        WgpuSettings {
+                            priority: WgpuSettingsPriority::Compatibility,
+                            ..default()
+                        },
+                    ),
                     ..default()
                 }),
         )
