@@ -57,7 +57,11 @@
             };
 
             gpuBackend = lib.mkOption {
-              type = lib.types.nullOr (lib.types.enum [ "vulkan" "gl" "gles" ]);
+              type = lib.types.nullOr (lib.types.enum (
+                if pkgs.stdenv.isDarwin
+                then [ "metal" "gl" "gles" ]
+                else [ "vulkan" "gl" "gles" ]
+              ));
               default = null;
               description = ''
                 Force the wgpu backend.
