@@ -130,7 +130,7 @@ craneLib.buildPackage (commonArgs // {
 
     # Step 2: wrapProgram for env var management
     wrapProgram $out/bin/ratty \
-      --set SHELL '${bash}/bin/bash' \
+      --set-default SHELL '${bash}/bin/bash' \
       --prefix LD_LIBRARY_PATH : '${runtimeLibraryPath}' \
       ${lib.optionalString stdenv.isDarwin ''
         --prefix DYLD_LIBRARY_PATH : '${runtimeLibraryPath}' \
