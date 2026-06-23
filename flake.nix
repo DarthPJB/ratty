@@ -177,6 +177,12 @@
         {
           inherit (opts) options;
           config = lib.mkIf cfg.enable {
+            assertions = [
+              {
+                assertion = cfg.package != null;
+                message = "programs.ratty.package must not be null when programs.ratty.enable is true";
+              }
+            ];
             home.packages = [ cfg.package ];
             xdg.configFile."ratty/ratty.toml" = lib.mkIf (cfg.settings != { }) {
               source = tomlFormat.generate "ratty.toml" cfg.settings;
@@ -219,6 +225,12 @@
         {
           inherit (opts) options;
           config = lib.mkIf cfg.enable {
+            assertions = [
+              {
+                assertion = cfg.package != null;
+                message = "programs.ratty.package must not be null when programs.ratty.enable is true";
+              }
+            ];
             environment.systemPackages = [
               (let
                 hasSettings = cfg.settings != { };
