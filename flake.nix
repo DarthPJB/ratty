@@ -83,6 +83,16 @@
               '';
               example = "RTX 3060";
             };
+
+            defaultShell = lib.mkOption {
+              type = lib.types.nullOr lib.types.package;
+              default = null;
+              description = ''
+                Default shell to use when no -e/--command flag is passed.
+                Set to null to use the package's built-in default (bash).
+              '';
+              example = lib.literalExpression "pkgs.zsh";
+            };
           };
         };
     in
@@ -195,6 +205,7 @@
             home.sessionVariables = lib.mkMerge [
               (lib.mkIf (cfg.gpuBackend != null) { WGPU_BACKEND = cfg.gpuBackend; })
               (lib.mkIf (cfg.gpuAdapter != null) { WGPU_ADAPTER_NAME = cfg.gpuAdapter; })
+              (lib.mkIf (cfg.defaultShell != null) { SHELL = lib.getExe cfg.defaultShell; })
             ];
           };
         };
@@ -253,7 +264,8 @@
                     makeWrapper ${lib.getExe cfg.package} $out/bin/ratty \
                       ${lib.optionalString hasSettings "--add-flags \"--config-file /etc/ratty/ratty.toml\""} \
                       ${lib.optionalString (cfg.gpuBackend != null) "--set WGPU_BACKEND '${cfg.gpuBackend}'"} \
-                      ${lib.optionalString (cfg.gpuAdapter != null) "--set WGPU_ADAPTER_NAME '${cfg.gpuAdapter}'"}
+                      ${lib.optionalString (cfg.gpuAdapter != null) "--set WGPU_ADAPTER_NAME '${cfg.gpuAdapter}'"} \
+                      ${lib.optionalString (cfg.defaultShell != null) "--set-default SHELL '${lib.getExe cfg.defaultShell}'"}
                   '';
                 })
             ];
