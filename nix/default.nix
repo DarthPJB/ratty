@@ -58,7 +58,7 @@ let
   # cache hit rate — dependency hashes don't change when assets/docs change.
   commonArgs = {
     pname = "ratty";
-    version = "0.4.1";
+    version = "0.4.2";
 
     src = craneLib.cleanCargoSource ../.;
 
