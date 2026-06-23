@@ -35,8 +35,8 @@
 
             package = lib.mkOption {
               type = lib.types.package;
-              default = self.packages.${pkgs.stdenv.hostPlatform.system}.ratty;
-              defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.ratty";
+              default = pkgs.ratty;
+              defaultText = lib.literalExpression "pkgs.ratty";
               description = "The ratty package to install.";
             };
 
@@ -133,6 +133,11 @@
       );
 
       formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixfmt-rfc-style);
+
+      # Overlay — adds pkgs.ratty for use with the NixOS/HM modules.
+      overlays.default = final: prev: {
+        ratty = self.packages.${final.stdenv.hostPlatform.system}.ratty;
+      };
 
       checks = forEachSystem (
         system:
