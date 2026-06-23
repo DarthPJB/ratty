@@ -7,7 +7,11 @@
   };
 
   outputs =
-    { self, nixpkgs, crane }:
+    {
+      self,
+      nixpkgs,
+      crane,
+    }:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -57,11 +61,22 @@
             };
 
             gpuBackend = lib.mkOption {
-              type = lib.types.nullOr (lib.types.enum (
-                if pkgs.stdenv.isDarwin
-                then [ "metal" "gl" "gles" ]
-                else [ "vulkan" "gl" "gles" ]
-              ));
+              type = lib.types.nullOr (
+                lib.types.enum (
+                  if pkgs.stdenv.isDarwin then
+                    [
+                      "metal"
+                      "gl"
+                      "gles"
+                    ]
+                  else
+                    [
+                      "vulkan"
+                      "gl"
+                      "gles"
+                    ]
+                )
+              );
               default = null;
               description = ''
                 Force the wgpu backend.
@@ -248,26 +263,30 @@
               }
             ];
             environment.systemPackages = [
-              (let
-                hasSettings = cfg.settings != { };
-                hasGpuOpts = cfg.gpuBackend != null || cfg.gpuAdapter != null;
-              in
-              if !(hasSettings || hasGpuOpts) then
-                cfg.package
-              else
-                pkgs.symlinkJoin {
-                  name = "ratty-system-wrapped";
-                  paths = [ cfg.package ];
-                  nativeBuildInputs = [ pkgs.makeWrapper ];
-                  postBuild = ''
-                    rm -f $out/bin/ratty
-                    makeWrapper ${lib.getExe cfg.package} $out/bin/ratty \
-                      ${lib.optionalString hasSettings "--add-flags \"--config-file /etc/ratty/ratty.toml\""} \
-                      ${lib.optionalString (cfg.gpuBackend != null) "--set WGPU_BACKEND '${cfg.gpuBackend}'"} \
-                      ${lib.optionalString (cfg.gpuAdapter != null) "--set WGPU_ADAPTER_NAME '${cfg.gpuAdapter}'"} \
-                      ${lib.optionalString (cfg.defaultShell != null) "--set-default SHELL '${lib.getExe cfg.defaultShell}'"}
-                  '';
-                })
+              (
+                let
+                  hasSettings = cfg.settings != { };
+                  hasGpuOpts = cfg.gpuBackend != null || cfg.gpuAdapter != null;
+                in
+                if !(hasSettings || hasGpuOpts) then
+                  cfg.package
+                else
+                  pkgs.symlinkJoin {
+                    name = "ratty-system-wrapped";
+                    paths = [ cfg.package ];
+                    nativeBuildInputs = [ pkgs.makeWrapper ];
+                    postBuild = ''
+                      rm -f $out/bin/ratty
+                      makeWrapper ${lib.getExe cfg.package} $out/bin/ratty \
+                        ${lib.optionalString hasSettings "--add-flags \"--config-file /etc/ratty/ratty.toml\""} \
+                        ${lib.optionalString (cfg.gpuBackend != null) "--set WGPU_BACKEND '${cfg.gpuBackend}'"} \
+                        ${lib.optionalString (cfg.gpuAdapter != null) "--set WGPU_ADAPTER_NAME '${cfg.gpuAdapter}'"} \
+                        ${lib.optionalString (
+                          cfg.defaultShell != null
+                        ) "--set-default SHELL '${lib.getExe cfg.defaultShell}'"}
+                    '';
+                  }
+              )
             ];
 
             environment.etc."ratty/ratty.toml" = lib.mkIf (cfg.settings != { }) {
