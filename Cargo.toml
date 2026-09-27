@@ -80,3 +80,11 @@ opt-level = 3
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+# Optimized builds for day-to-day development: skips LTO and splits codegen
+# so rebuilds after an edit take seconds instead of minutes.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
