@@ -21,5 +21,6 @@ pub mod rendering;
 pub mod rgp;
 pub mod runtime;
 pub mod scene;
+pub mod screen;
 pub mod systems;
 pub mod terminal;

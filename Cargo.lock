@@ -2364,26 +2364,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_filter"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.11.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
-dependencies = [
- "env_filter",
- "log",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2693,6 +2673,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fux-vt"
+version = "0.1.5"
+source = "git+https://github.com/gold-silver-copper/fux?branch=feat%2Ffux-vt-ratty#14b37a1ed8c0757df530f36676176ce7f7f1e1fe"
+dependencies = [
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2744,7 +2733,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi 6.0.0",
- "rand_core 0.10.1",
  "wasip2",
  "wasip3",
 ]
@@ -4487,17 +4475,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quickcheck"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95c589f335db0f6aaa168a7cd27b1fc6920f5e1470c804f814d9cd6e62a0f70b"
-dependencies = [
- "env_logger",
- "log",
- "rand 0.10.1",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4695,10 +4672,10 @@ dependencies = [
  "bevy_terminal_ratatui",
  "clap",
  "etcetera",
+ "fux-vt",
  "image",
  "portable-pty",
  "ratatui",
- "ratty-vt",
  "rust-embed",
  "serde",
  "shellexpand",
@@ -4707,20 +4684,6 @@ dependencies = [
  "toml 0.8.23",
  "winit",
  "winresource",
-]
-
-[[package]]
-name = "ratty-vt"
-version = "0.1.0"
-dependencies = [
- "compact_str",
- "itoa",
- "quickcheck",
- "serde",
- "serde_json",
- "unicode-segmentation",
- "unicode-width",
- "vte",
 ]
 
 [[package]]
@@ -5974,16 +5937,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vte"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
-dependencies = [
- "arrayvec",
- "memchr",
-]
 
 [[package]]
 name = "vtparse"
