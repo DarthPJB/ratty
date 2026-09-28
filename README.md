@@ -262,11 +262,6 @@ separate package under `widget/` with its own lockfile.
 cargo test --workspace --locked     # Application tests and doctests
 ```
 
-Ratty turns on the `fux-vt` behaviour it relies on through
-`PARSER_OPTIONS` in `src/runtime.rs`: the kitty keyboard protocol, reflow on
-resize, and Ratty's name and version in device replies. Engine changes and
-their tests live in the fux repository.
-
 ## Touchscreen
 
 In 3D mode, drag with one finger to rotate the terminal. Move two fingers together to pan, and
