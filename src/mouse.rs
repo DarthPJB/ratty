@@ -354,7 +354,7 @@ impl TerminalSelection {
 
             if let Some(grid_row) = screen.visible_row(row) {
                 for col in row_start..=row_end {
-                    let Some(cell) = grid_row.cells.get(usize::from(col)) else {
+                    let Some(cell) = grid_row.cell(usize::from(col)) else {
                         break;
                     };
                     // The second half of a wide glyph is padding, not an

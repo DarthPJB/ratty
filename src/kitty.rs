@@ -304,7 +304,7 @@ pub fn refresh_kitty_placeholder_anchors(
             continue;
         };
         for col in 0..cols {
-            let Some(cell) = grid_row.cells.get(usize::from(col)) else {
+            let Some(cell) = grid_row.cell(usize::from(col)) else {
                 break;
             };
             // Placeholders may carry combining diacritics that encode the

@@ -8,7 +8,7 @@
 
 use std::ops::Deref;
 
-use fux_vt::{Cell, Row, Screen};
+use fux_vt::{CellRef, Row, Screen};
 
 /// Kitty graphics Unicode placeholder (U+10EEEE). A cell starting with it
 /// marks where an image goes; its diacritics carry the image row and column.
@@ -51,8 +51,8 @@ impl<'a> ScreenView<'a> {
 
     /// Returns the cell drawn at `row`, `col` of the view.
     #[must_use]
-    pub fn cell(&self, row: u16, col: u16) -> Option<&'a Cell> {
-        self.visible_row(row)?.cells.get(usize::from(col))
+    pub fn cell(&self, row: u16, col: u16) -> Option<CellRef<'a>> {
+        self.visible_row(row)?.cell(usize::from(col))
     }
 
     /// Returns the cell a renderer should draw the cursor in, as `(row, col)`.
@@ -70,7 +70,7 @@ impl<'a> ScreenView<'a> {
         if self
             .screen
             .cell(row, col)
-            .is_some_and(Cell::is_wide_continuation)
+            .is_some_and(|cell| cell.is_wide_continuation())
         {
             col = col.saturating_sub(1);
         }
@@ -93,7 +93,7 @@ impl<'a> ScreenView<'a> {
             .map(|row| {
                 let mut text = String::new();
                 if let Some(row) = self.visible_row(row) {
-                    for cell in row.cells.iter().filter(|c| !c.is_wide_continuation()) {
+                    for cell in row.cells().filter(|c| !c.is_wide_continuation()) {
                         text.push_str(if cell.has_contents() {
                             cell.contents()
                         } else {
@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(top.scrollback(), 10);
         assert_eq!(top.row_texts(), ["row0", "row1", "row2"]);
         assert!(top.visible_row(3).is_none());
-        assert_eq!(top.cell(0, 0).map(Cell::contents), Some("r"));
+        assert_eq!(top.cell(0, 0).map(|cell| cell.contents()), Some("r"));
     }
 
     #[test]

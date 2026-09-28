@@ -20,7 +20,7 @@ use ratatui::widgets::Widget;
 
 use crate::config::{AppConfig, FontConfig, FontStyleConfig, ThemeConfig};
 use crate::mouse::TerminalSelection;
-use fux_vt::{Blink, Cell as VtCell, Color as VtColor};
+use fux_vt::{Blink, CellRef, Color as VtColor};
 
 use crate::screen::{KITTY_PLACEHOLDER, ScreenView};
 
@@ -491,7 +491,7 @@ impl Widget for TerminalWidget<'_> {
                 continue;
             };
             for col in 0..draw_cols {
-                let Some(vt_cell) = grid_row.cells.get(usize::from(col)) else {
+                let Some(vt_cell) = grid_row.cell(usize::from(col)) else {
                     break;
                 };
                 let cell = &mut buf[(area.x + col, area.y + row)];
@@ -506,7 +506,7 @@ impl Widget for TerminalWidget<'_> {
                 if vt_cell.is_wide_continuation() {
                     let owner = col
                         .checked_sub(1)
-                        .and_then(|left| grid_row.cells.get(usize::from(left)))
+                        .and_then(|left| grid_row.cell(usize::from(left)))
                         .filter(|left| left.is_wide())
                         .unwrap_or(vt_cell);
                     let mut style = cell_style(owner, &theme_palette, theme_fg, self.font_style);
@@ -553,7 +553,7 @@ fn forced_width(width: u16) -> CellDiffOption {
 }
 
 fn cell_style(
-    cell: &VtCell,
+    cell: CellRef<'_>,
     theme_palette: &[TuiColor; 16],
     theme_fg: TuiColor,
     font_style: FontStyleConfig,
@@ -714,6 +714,21 @@ mod tests {
             .cell((col, row))
             .map(|cell| cell.style.background)
             .unwrap_or(TerminalColor::Default)
+    }
+
+    /// Grapheme clusters longer than a cell holds inline (skin-toned ZWJ
+    /// sequences, subdivision flags) reach the buffer whole, in one wide
+    /// cell, and what follows them lands where the application put it.
+    #[test]
+    fn long_grapheme_clusters_render_whole_in_one_cell() {
+        for cluster in [
+            "\u{1F469}\u{1F3FD}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F48B}\u{200D}\u{1F468}\u{1F3FB}",
+            "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+        ] {
+            let cells = render_cells(2, 6, format!("{cluster}|").as_bytes());
+            assert_eq!(cells[0].symbol(), cluster);
+            assert_eq!(cells[2].symbol(), "|", "{cluster:?}");
+        }
     }
 
     /// A narrowed DECSTBM region must not shift or blank the drawn grid: the

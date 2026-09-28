@@ -5,7 +5,7 @@ use bevy::render::render_resource::Extent3d;
 
 use crate::screen::ScreenView;
 use crate::terminal::TerminalSurface;
-use fux_vt::{Cell, Color};
+use fux_vt::{CellRef, Color};
 
 type Rgba = [u8; 4];
 const DEBUG_BG: Rgba = [18, 20, 28, 255];
@@ -115,9 +115,7 @@ impl<'a> CellDebugImageRenderer<'a> {
                 self.draw_rect_outline(rect, DEBUG_GRID_OUTLINE);
 
                 let Some(cell) = grid_row.as_ref().and_then(|grid_row| {
-                    usize::try_from(col)
-                        .ok()
-                        .and_then(|col| grid_row.cells.get(col))
+                    usize::try_from(col).ok().and_then(|col| grid_row.cell(col))
                 }) else {
                     continue;
                 };
@@ -247,7 +245,7 @@ impl<'a> CellDebugImageRenderer<'a> {
     }
 }
 
-fn cell_is_active(cell: &Cell) -> bool {
+fn cell_is_active(cell: CellRef<'_>) -> bool {
     cell.has_contents() && !cell.is_wide_continuation()
 }
 
@@ -357,12 +355,12 @@ mod tests {
         let screen = ScreenView::new(parser.screen(), 0);
 
         let row = screen.visible_row(0).expect("row 0");
-        let pad = row.cells.get(13).expect("column 13");
+        let pad = row.cell(13).expect("column 13");
         assert!(!pad.has_contents());
         assert!(!cell_is_active(pad));
 
         let next = screen.visible_row(1).expect("row 1");
-        assert!(cell_is_active(next.cells.first().expect("column 0")));
-        assert!(!cell_is_active(next.cells.get(1).expect("column 1")));
+        assert!(cell_is_active(next.cell(0).expect("column 0")));
+        assert!(!cell_is_active(next.cell(1).expect("column 1")));
     }
 }
