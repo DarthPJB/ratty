@@ -20,7 +20,9 @@ use ratatui::widgets::Widget;
 
 use crate::config::{AppConfig, FontConfig, FontStyleConfig, ThemeConfig};
 use crate::mouse::TerminalSelection;
-use ratty_vt::{Blink, Cell as VtCell, Color as VtColor, KITTY_PLACEHOLDER, Screen};
+use fux_vt::{Blink, CellRef, Color as VtColor};
+
+use crate::screen::{KITTY_PLACEHOLDER, ScreenView};
 
 /// Terminal grid and presentation dimensions.
 #[derive(Clone, Copy, Debug)]
@@ -462,8 +464,8 @@ fn points_to_logical_pixels(points: i32) -> f32 {
 
 /// Ratatui widget backed by the terminal screen.
 pub struct TerminalWidget<'a> {
-    /// Terminal state to render.
-    pub screen: &'a Screen,
+    /// Terminal state to render, as the user sees it.
+    pub screen: ScreenView<'a>,
     /// Active selection.
     pub selection: &'a TerminalSelection,
     /// Terminal theme.
@@ -489,7 +491,7 @@ impl Widget for TerminalWidget<'_> {
                 continue;
             };
             for col in 0..draw_cols {
-                let Some(vt_cell) = grid_row.get(col) else {
+                let Some(vt_cell) = grid_row.cell(usize::from(col)) else {
                     break;
                 };
                 let cell = &mut buf[(area.x + col, area.y + row)];
@@ -504,7 +506,7 @@ impl Widget for TerminalWidget<'_> {
                 if vt_cell.is_wide_continuation() {
                     let owner = col
                         .checked_sub(1)
-                        .and_then(|left| grid_row.get(left))
+                        .and_then(|left| grid_row.cell(usize::from(left)))
                         .filter(|left| left.is_wide())
                         .unwrap_or(vt_cell);
                     let mut style = cell_style(owner, &theme_palette, theme_fg, self.font_style);
@@ -551,7 +553,7 @@ fn forced_width(width: u16) -> CellDiffOption {
 }
 
 fn cell_style(
-    cell: &VtCell,
+    cell: CellRef<'_>,
     theme_palette: &[TuiColor; 16],
     theme_fg: TuiColor,
     font_style: FontStyleConfig,
@@ -634,15 +636,15 @@ mod tests {
     use bevy_terminal_ratatui::prelude::{TerminalColor, TerminalSnapshot};
     use ratatui::buffer::{Cell, CellWidth};
 
-    use ratty_vt::Parser;
+    use fux_vt::Parser;
 
     fn parse(rows: u16, cols: u16, input: &[u8]) -> Parser {
-        let mut parser = Parser::new(rows, cols, 1000);
-        parser.process(input);
+        let mut parser = Parser::new(rows, cols, 1000).expect("parser");
+        parser.process(input).expect("process");
         parser
     }
 
-    fn render_buffer(screen: &Screen) -> Buffer {
+    fn render_buffer(screen: ScreenView<'_>) -> Buffer {
         let (rows, cols) = screen.size();
         let area = Rect::new(0, 0, cols, rows);
         let mut buffer = Buffer::empty(area);
@@ -659,14 +661,14 @@ mod tests {
     /// Renders `input` through [`TerminalWidget`] and returns row 0's cells.
     fn render_cells(rows: u16, cols: u16, input: &[u8]) -> Vec<Cell> {
         let parser = parse(rows, cols, input);
-        let buffer = render_buffer(parser.screen());
+        let buffer = render_buffer(ScreenView::new(parser.screen(), 0));
         (0..cols).map(|col| buffer[(col, 0)].clone()).collect()
     }
 
     /// Renders `input` through [`TerminalWidget`] and returns the drawn rows.
     fn render_rows(rows: u16, cols: u16, input: &[u8]) -> Vec<String> {
         let parser = parse(rows, cols, input);
-        let buffer = render_buffer(parser.screen());
+        let buffer = render_buffer(ScreenView::new(parser.screen(), 0));
         (0..rows)
             .map(|row| {
                 (0..cols)
@@ -680,7 +682,7 @@ mod tests {
 
     /// Draws a terminal state through Ratatui's differential update path into
     /// the retained Bevy terminal surface.
-    fn draw_screen(tui: &mut RatatuiTerminal, screen: &Screen) {
+    fn draw_screen(tui: &mut RatatuiTerminal, screen: ScreenView<'_>) {
         tui.draw(|frame| {
             frame.render_widget(
                 TerminalWidget {
@@ -697,7 +699,7 @@ mod tests {
     /// Builds and draws a fresh terminal state through [`draw_screen`].
     fn draw_input(tui: &mut RatatuiTerminal, rows: u16, cols: u16, input: &[u8]) {
         let parser = parse(rows, cols, input);
-        draw_screen(tui, parser.screen());
+        draw_screen(tui, ScreenView::new(parser.screen(), 0));
     }
 
     fn symbol(snapshot: &TerminalSnapshot, col: u16, row: u16) -> String {
@@ -712,6 +714,21 @@ mod tests {
             .cell((col, row))
             .map(|cell| cell.style.background)
             .unwrap_or(TerminalColor::Default)
+    }
+
+    /// Grapheme clusters longer than a cell holds inline (skin-toned ZWJ
+    /// sequences, subdivision flags) reach the buffer whole, in one wide
+    /// cell, and what follows them lands where the application put it.
+    #[test]
+    fn long_grapheme_clusters_render_whole_in_one_cell() {
+        for cluster in [
+            "\u{1F469}\u{1F3FD}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F48B}\u{200D}\u{1F468}\u{1F3FB}",
+            "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+        ] {
+            let cells = render_cells(2, 6, format!("{cluster}|").as_bytes());
+            assert_eq!(cells[0].symbol(), cluster);
+            assert_eq!(cells[2].symbol(), "|", "{cluster:?}");
+        }
     }
 
     /// A narrowed DECSTBM region must not shift or blank the drawn grid: the
@@ -793,15 +810,14 @@ mod tests {
     fn scrollback_redraws_wide_graphemes_without_artifacts() {
         let (rows, cols) = (2, 8);
         let (mut tui, _) = RatatuiTerminal::new(cols, rows);
-        let mut parser = parse(
+        let parser = parse(
             rows,
             cols,
             "\x1b[42m\u{4f60}\u{1f600}\x1b[0m\r\nsecond\r\nthird\r\nfourth".as_bytes(),
         );
 
         for offset in [1, 2, 0, 2, 1, 2] {
-            parser.screen_mut().set_scrollback(offset);
-            draw_screen(&mut tui, parser.screen());
+            draw_screen(&mut tui, ScreenView::new(parser.screen(), offset));
 
             let snapshot = tui.snapshot();
             if offset == 2 {

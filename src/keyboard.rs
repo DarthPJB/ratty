@@ -19,7 +19,7 @@ use crate::scene::{
     MobiusEnterZoomFloor, MobiusTransition, TerminalPlaneWarp, TerminalPresentationMode,
 };
 use crate::terminal::{TerminalRedrawState, TerminalSurface};
-use ratty_vt::MouseProtocolMode;
+use fux_vt::MouseProtocolMode;
 
 /// Clipboard bridge for terminal copy and paste.
 pub struct TerminalClipboard {
@@ -491,13 +491,13 @@ pub fn handle_keyboard_input(
                             ));
                         }
                     } else {
-                        let current = params.runtime.screen().scrollback();
+                        let current = params.runtime.scrollback();
                         let next = if direction.is_positive() {
                             current.saturating_add(amount)
                         } else {
                             current.saturating_sub(amount)
                         };
-                        params.runtime.screen_mut().set_scrollback(next);
+                        params.runtime.set_scrollback(next);
                         params.selection.clear();
                         params.redraw.request();
                     }
@@ -584,8 +584,8 @@ pub fn handle_keyboard_input(
             params.runtime.kitty_keyboard_flags(),
             params.runtime.modify_other_keys(),
         ) {
-            if params.runtime.screen().scrollback() != 0 {
-                params.runtime.screen_mut().set_scrollback(0);
+            if params.runtime.scrollback() != 0 {
+                params.runtime.set_scrollback(0);
                 params.redraw.request();
             }
             params.runtime.write_input(&input);
