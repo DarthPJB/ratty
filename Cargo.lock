@@ -1433,9 +1433,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_terminal"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "623c10e148c07fe40809093c4e8b0934d5c9c53af8ad05efdb727da9e24adc5e"
+checksum = "359a8a2ba0dfa5cf4b2386bf611ae27ca7aee22f6545229fc918823b505f7cab"
 dependencies = [
  "bevy",
  "bitflags 2.13.0",
