@@ -10,7 +10,6 @@ description = "A GPU-rendered terminal emulator that supports inline 3D graphics
 authors = ["Orhun Parmaksız <orhunparmaksiz@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/orhun/ratty"
 repository = "https://github.com/orhun/ratty"
 keywords = ["terminal", "emulator", "3d", "graphics"]
 categories = ["command-line-utilities", "graphics"]
@@ -50,7 +49,7 @@ clap = { version = "4.5", features = ["derive"] }
 etcetera = "0.11"
 fux-vt = "0.2.0"
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
-bevy_terminal_ratatui = { version = "0.7.3", default-features = false, features = ["system_fonts"] }
+bevy_terminal_ratatui = { version = "0.8.1", default-features = false, features = ["system_fonts"] }
 portable-pty = "0.8"
 ratatui = "0.30"
 rust-embed = "8.5"

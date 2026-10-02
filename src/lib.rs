@@ -3,6 +3,7 @@
 //! This crate provides the terminal runtime, scene integration, protocol handling and widget
 //! plumbing for Ratty.
 
+#![recursion_limit = "256"]
 #![warn(missing_docs)]
 #![warn(clippy::unwrap_used)]
 
