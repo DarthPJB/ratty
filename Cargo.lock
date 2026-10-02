@@ -1445,9 +1445,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_terminal_ratatui"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dda9803c086224d047bc2b46445ece76fa671f5c56ad53339f7569c996a1c2a2"
+checksum = "0cae777e51005cc019bc9fe56b83dc81fb2a1e6c28788360c1ec2c3e725b712b"
 dependencies = [
  "bevy",
  "bevy_terminal",
