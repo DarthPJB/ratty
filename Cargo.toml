@@ -10,7 +10,6 @@ description = "A GPU-rendered terminal emulator that supports inline 3D graphics
 authors = ["Orhun Parmaksız <orhunparmaksiz@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/orhun/ratty"
 repository = "https://github.com/orhun/ratty"
 keywords = ["terminal", "emulator", "3d", "graphics"]
 categories = ["command-line-utilities", "graphics"]
