@@ -21,8 +21,15 @@ TERM = "xterm-256color"
 
 [font]
 family = "DejaVu Sans Mono"
+# Explicit font files override `family` (paths relative to this file).
+# regular = "fonts/IosevkaFixed-Regular.ttf"
+# bold = "fonts/IosevkaFixed-Bold.ttf"
+# italic = "fonts/IosevkaFixed-Italic.ttf"
+# bold_italic = "fonts/IosevkaFixed-BoldItalic.ttf"
 style = "Regular"
 size = 12
+# Row height as a multiple of the font's natural line height.
+# line_height = 1.0
 
 [cursor.model]
 path = "CairoSpinyMouse.obj"
@@ -40,8 +47,8 @@ bob_amplitude = 0.08
 
 [bindings]
 keys = [
-  { key = "C", with = "Control | alt", action = "Copy" },
-  { key = "V", with = "Control | alt", action = "Paste" },
+  { key = "C", with = "Control | shift", action = "Copy" },
+  { key = "V", with = "Control | shift", action = "Paste" },
   { key = "PageUp", with = "alt", action = "ScrollPageUp" },
   { key = "PageDown", with = "alt", action = "ScrollPageDown" },
   { key = "Up", with = "alt", action = "ScrollUp" },
@@ -49,8 +56,19 @@ keys = [
   { key = "Equal", with = "Control", action = "IncreaseFontSize" },
   { key = "Minus", with = "Control", action = "DecreaseFontSize" },
   { key = "Digit0", with = "Control | alt", action = "ResetFontSize" },
-  { key = "Enter", with = "Control | alt", action = "Toggle3DMode" },
+  { key = "Enter", with = "Control | alt", action = "ToggleOrtho3DMode" },
+  { key = "P", with = "Control | alt", action = "TogglePersp3DMode" },
   { key = "M", with = "Control | alt", action = "ToggleMobiusMode" },
+  { key = "Digit0", with = "Control | alt | shift", action = "ActivateCameraSlot0" },
+  { key = "Digit1", with = "Control | alt | shift", action = "ActivateCameraSlot1" },
+  { key = "Digit2", with = "Control | alt | shift", action = "ActivateCameraSlot2" },
+  { key = "Digit3", with = "Control | alt | shift", action = "ActivateCameraSlot3" },
+  { key = "Digit4", with = "Control | alt | shift", action = "ActivateCameraSlot4" },
+  { key = "Digit5", with = "Control | alt | shift", action = "ActivateCameraSlot5" },
+  { key = "Digit6", with = "Control | alt | shift", action = "ActivateCameraSlot6" },
+  { key = "Digit7", with = "Control | alt | shift", action = "ActivateCameraSlot7" },
+  { key = "Digit8", with = "Control | alt | shift", action = "ActivateCameraSlot8" },
+  { key = "Digit9", with = "Control | alt | shift", action = "ActivateCameraSlot9" },
   { key = "Up", with = "Control | alt", action = "IncreaseWarp" },
   { key = "Down", with = "Control | alt", action = "DecreaseWarp" },
 ]

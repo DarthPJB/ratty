@@ -15,10 +15,6 @@ use crate::paths::expand_path;
 pub const APP_NAME: &str = "ratty";
 /// Local fallback config path.
 pub const CONFIG_PATH: &str = "config/ratty.toml";
-/// Label used for the terminal present texture (sampled by the materials).
-pub const TERMINAL_TEXTURE_LABEL: &str = "ratty.parley_ratatui";
-/// Label used for the terminal render target (Vello's storage texture).
-pub const TERMINAL_RENDER_TEXTURE_LABEL: &str = "ratty.parley_ratatui.render";
 /// Z depth used for the cursor model root.
 pub const CURSOR_DEPTH: f32 = 10.0;
 
@@ -103,6 +99,27 @@ impl AppConfig {
         if let Some(program) = self.shell.program.as_mut() {
             *program = resolve_config_path(config_dir, program);
         }
+        for face in [
+            &mut self.font.regular,
+            &mut self.font.bold,
+            &mut self.font.italic,
+            &mut self.font.bold_italic,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *face = resolve_relative_to(config_dir, face);
+        }
+    }
+}
+
+/// Resolves `path` against `base` when it is relative, after `~` expansion.
+fn resolve_relative_to(base: &Path, path: &Path) -> PathBuf {
+    let expanded = expand_path(path);
+    if expanded.is_relative() {
+        base.join(expanded)
+    } else {
+        expanded
     }
 }
 
@@ -229,12 +246,46 @@ pub enum BindingAction {
     /// Disables a binding.
     #[serde(rename = "none")]
     None,
-    /// Toggles between the flat and warped terminal views.
-    #[serde(rename = "Toggle3DMode")]
-    Toggle3DMode,
+    /// Toggles between the flat and orthographic terminal views.
+    #[serde(rename = "ToggleOrtho3DMode")]
+    #[serde(alias = "Toggle3DMode")]
+    ToggleOrtho3DMode,
+    /// Toggles the perspective terminal view.
+    #[serde(rename = "TogglePersp3DMode")]
+    TogglePersp3DMode,
     /// Toggles the Mobius-strip terminal view.
     #[serde(rename = "ToggleMobiusMode")]
     ToggleMobiusMode,
+    /// Activates camera preset 0.
+    #[serde(rename = "ActivateCameraSlot0")]
+    ActivateCameraSlot0,
+    /// Activates camera preset 1.
+    #[serde(rename = "ActivateCameraSlot1")]
+    ActivateCameraSlot1,
+    /// Activates camera preset 2.
+    #[serde(rename = "ActivateCameraSlot2")]
+    ActivateCameraSlot2,
+    /// Activates camera preset 3.
+    #[serde(rename = "ActivateCameraSlot3")]
+    ActivateCameraSlot3,
+    /// Activates camera preset 4.
+    #[serde(rename = "ActivateCameraSlot4")]
+    ActivateCameraSlot4,
+    /// Activates camera preset 5.
+    #[serde(rename = "ActivateCameraSlot5")]
+    ActivateCameraSlot5,
+    /// Activates camera preset 6.
+    #[serde(rename = "ActivateCameraSlot6")]
+    ActivateCameraSlot6,
+    /// Activates camera preset 7.
+    #[serde(rename = "ActivateCameraSlot7")]
+    ActivateCameraSlot7,
+    /// Activates camera preset 8.
+    #[serde(rename = "ActivateCameraSlot8")]
+    ActivateCameraSlot8,
+    /// Activates camera preset 9.
+    #[serde(rename = "ActivateCameraSlot9")]
+    ActivateCameraSlot9,
     /// Scrolls one page up through scrollback.
     #[serde(rename = "ScrollPageUp")]
     ScrollPageUp,
@@ -270,24 +321,61 @@ pub enum BindingAction {
     ResetFontSize,
 }
 
+impl BindingAction {
+    /// Returns the camera slot selected by this action, if any.
+    pub const fn camera_slot(self) -> Option<usize> {
+        match self {
+            Self::ActivateCameraSlot0 => Some(0),
+            Self::ActivateCameraSlot1 => Some(1),
+            Self::ActivateCameraSlot2 => Some(2),
+            Self::ActivateCameraSlot3 => Some(3),
+            Self::ActivateCameraSlot4 => Some(4),
+            Self::ActivateCameraSlot5 => Some(5),
+            Self::ActivateCameraSlot6 => Some(6),
+            Self::ActivateCameraSlot7 => Some(7),
+            Self::ActivateCameraSlot8 => Some(8),
+            Self::ActivateCameraSlot9 => Some(9),
+            _ => None,
+        }
+    }
+}
+
 /// Font configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct FontConfig {
     /// Font family name.
     pub family: String,
+    /// Optional regular font file. When set, this takes precedence over `family`.
+    pub regular: Option<PathBuf>,
+    /// Optional bold font file used with `regular`.
+    pub bold: Option<PathBuf>,
+    /// Optional italic font file used with `regular`.
+    pub italic: Option<PathBuf>,
+    /// Optional bold-italic font file used with `regular`.
+    pub bold_italic: Option<PathBuf>,
     /// Font style override.
     pub style: FontStyleConfig,
     /// Font size in points (1pt = 4/3 logical pixels).
     pub size: i32,
+    /// Row height as a multiple of the font's natural line box: `1.0` keeps
+    /// the font's own spacing, `0.9` packs rows tighter (useful for tall
+    /// fonts such as Iosevka), `1.2` spaces them out. Below `1.0` the
+    /// outermost ascender and descender pixels are clipped.
+    pub line_height: f32,
 }
 
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
             family: "DejaVu Sans Mono".to_string(),
+            regular: None,
+            bold: None,
+            italic: None,
+            bold_italic: None,
             style: FontStyleConfig::Regular,
             size: 18,
+            line_height: 1.0,
         }
     }
 }
@@ -517,4 +605,77 @@ fn parse_hex_color(value: &str) -> anyhow::Result<[u8; 3]> {
     let b = u8::from_str_radix(&hex[4..6], 16)
         .with_context(|| format!("invalid blue component in {value}"))?;
     Ok([r, g, b])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_legacy_toggle_3d_mode_binding_action() {
+        let binding: KeyBindingConfig = toml::from_str(
+            r#"
+key = "Enter"
+with = "Control | alt"
+action = "Toggle3DMode"
+"#,
+        )
+        .expect("legacy Toggle3DMode action should deserialize");
+
+        assert_eq!(binding.action, BindingAction::ToggleOrtho3DMode);
+    }
+
+    #[test]
+    fn parses_every_camera_slot_binding_action() {
+        for slot in 0..10 {
+            let source = format!(
+                "key = \"Digit{slot}\"\nwith = \"Control | alt | shift\"\naction = \"ActivateCameraSlot{slot}\""
+            );
+            let binding: KeyBindingConfig = toml::from_str(&source).expect("camera slot binding");
+            assert_eq!(binding.action.camera_slot(), Some(slot));
+        }
+    }
+
+    #[test]
+    fn distributed_config_binds_every_camera_slot() {
+        let config: AppConfig =
+            toml::from_str(include_str!("../config/ratty.toml")).expect("distributed config");
+        let mut slots = config
+            .bindings
+            .keys
+            .iter()
+            .filter_map(|binding| binding.action.camera_slot())
+            .collect::<Vec<_>>();
+        slots.sort_unstable();
+        assert_eq!(slots, (0..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn resolves_explicit_font_faces_relative_to_the_config() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+[font]
+regular = "Regular.ttf"
+bold = "fonts/Bold.ttf"
+italic = "/absolute/Italic.ttf"
+"#,
+        )
+        .expect("font config");
+
+        config.resolve_relative_paths(Path::new("/config/ratty.toml"));
+
+        assert_eq!(
+            config.font.regular.as_deref(),
+            Some(Path::new("/config/Regular.ttf"))
+        );
+        assert_eq!(
+            config.font.bold.as_deref(),
+            Some(Path::new("/config/fonts/Bold.ttf"))
+        );
+        assert_eq!(
+            config.font.italic.as_deref(),
+            Some(Path::new("/absolute/Italic.ttf"))
+        );
+        assert_eq!(config.font.bold_italic, None);
+    }
 }

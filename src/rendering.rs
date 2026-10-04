@@ -3,7 +3,9 @@
 use bevy::prelude::*;
 use bevy::render::render_resource::Extent3d;
 
+use crate::screen::ScreenView;
 use crate::terminal::TerminalSurface;
+use fux_vt::{CellRef, Color};
 
 type Rgba = [u8; 4];
 const DEBUG_BG: Rgba = [18, 20, 28, 255];
@@ -17,7 +19,7 @@ const DEBUG_BG_FALLBACK: Rgba = [31, 31, 40, 255];
 pub fn sync_terminal_debug_image(
     terminal: &TerminalSurface,
     images: &mut Assets<Image>,
-    screen: &vt100::Screen,
+    screen: ScreenView<'_>,
 ) {
     let Some(handle) = terminal.back_image_handle.as_ref() else {
         return;
@@ -99,22 +101,29 @@ impl<'a> CellDebugImageRenderer<'a> {
         }
     }
 
-    fn render(&mut self, screen: &vt100::Screen) {
+    fn render(&mut self, screen: ScreenView<'_>) {
         self.fill(DEBUG_BG);
 
         for row in 0..self.rows {
+            let grid_row = u16::try_from(row)
+                .ok()
+                .and_then(|row| screen.visible_row(row));
+
             for col in 0..self.cols {
                 let rect = self.cell_rect(row, col);
                 self.draw_rect(rect, DEBUG_GRID);
                 self.draw_rect_outline(rect, DEBUG_GRID_OUTLINE);
 
-                let Some(cell) = screen.cell(row as u16, col as u16) else {
+                let Some(cell) = grid_row.as_ref().and_then(|grid_row| {
+                    usize::try_from(col).ok().and_then(|col| grid_row.cell(col))
+                }) else {
                     continue;
                 };
 
-                let bg = vt100_debug_color(cell.bgcolor()).unwrap_or(DEBUG_BG_FALLBACK);
-                let fg = vt100_debug_color(cell.fgcolor()).unwrap_or(DEBUG_FG_FALLBACK);
-                let active = cell.has_contents() && !cell.is_wide_continuation();
+                let bg = debug_color(cell.bgcolor()).unwrap_or(DEBUG_BG_FALLBACK);
+                let fg = debug_color(cell.fgcolor()).unwrap_or(DEBUG_FG_FALLBACK);
+
+                let active = cell_is_active(cell);
                 let fill = if active {
                     bg
                 } else {
@@ -145,10 +154,10 @@ impl<'a> CellDebugImageRenderer<'a> {
             }
         }
 
-        if !screen.hide_cursor() {
-            let (cursor_row, cursor_col) = screen.cursor_position();
+        if !screen.cursor_hidden() {
+            let (cursor_row, cursor_col) = screen.display_cursor_position();
             self.draw_rect_outline(
-                self.cell_rect(cursor_row as u32, cursor_col as u32),
+                self.cell_rect(u32::from(cursor_row), u32::from(cursor_col)),
                 DEBUG_CURSOR,
             );
         }
@@ -174,8 +183,8 @@ impl<'a> CellDebugImageRenderer<'a> {
     }
 
     fn fill(&mut self, color: Rgba) {
-        for pixel in self.data.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&color);
+        for pixel in self.data.as_chunks_mut::<4>().0 {
+            *pixel = color;
         }
     }
 
@@ -236,6 +245,10 @@ impl<'a> CellDebugImageRenderer<'a> {
     }
 }
 
+fn cell_is_active(cell: CellRef<'_>) -> bool {
+    cell.has_contents() && !cell.is_wide_continuation()
+}
+
 #[derive(Clone, Copy)]
 struct CellRect {
     x0: u32,
@@ -284,11 +297,11 @@ fn blend_rgba(top: Rgba, bottom: Rgba, top_mix: f32) -> Rgba {
     ]
 }
 
-fn vt100_debug_color(color: vt100::Color) -> Option<Rgba> {
+fn debug_color(color: Color) -> Option<Rgba> {
     match color {
-        vt100::Color::Default => None,
-        vt100::Color::Idx(index) => Some(ansi_index_to_rgba(index)),
-        vt100::Color::Rgb(r, g, b) => Some([r, g, b, 255]),
+        Color::Default => None,
+        Color::Idx(index) => Some(ansi_index_to_rgba(index)),
+        Color::Rgb(r, g, b) => Some([r, g, b, 255]),
     }
 }
 
@@ -322,5 +335,32 @@ fn ansi_index_to_rgba(index: u8) -> Rgba {
             let shade = 8 + (index - 232) * 10;
             [shade, shade, shade, 255]
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use fux_vt::Parser;
+
+    /// A wide glyph that does not fit at the end of a row wraps and leaves
+    /// the skipped cell blank; the debug image must not paint it as content.
+    #[test]
+    fn wrapped_wide_character_padding_is_not_active_content() {
+        let mut parser = Parser::new(2, 14, 1000).expect("parser");
+        parser
+            .process("abcdefghijklm\u{4f60}".as_bytes())
+            .expect("process");
+        let screen = ScreenView::new(parser.screen(), 0);
+
+        let row = screen.visible_row(0).expect("row 0");
+        let pad = row.cell(13).expect("column 13");
+        assert!(!pad.has_contents());
+        assert!(!cell_is_active(pad));
+
+        let next = screen.visible_row(1).expect("row 1");
+        assert!(cell_is_active(next.cell(0).expect("column 0")));
+        assert!(!cell_is_active(next.cell(1).expect("column 1")));
     }
 }

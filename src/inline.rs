@@ -1,12 +1,11 @@
 //! Inline object state and APC handling.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
 use bevy::prelude::*;
-use vt100::Callbacks;
 
+use crate::camera::{OptionalVec3, TerminalCameraUpdate};
 use crate::kitty::{KittyOperation, KittyParserState, refresh_kitty_placeholder_anchors};
 use crate::model::{
     ObjectLoadOptions, load_object_source_from_bytes_with_options, load_object_source_with_options,
@@ -15,6 +14,9 @@ use crate::rgp::{
     RgpOperation, RgpPlacementStyle, RgpPlacementUpdate, RgpRegisterSource,
     consume_sequence as consume_rgp_sequence, support_reply,
 };
+use crate::runtime::TerminalRuntime;
+use crate::screen::ScreenView;
+
 const APC_START: &[u8] = b"\x1b_";
 const ST: &[u8] = b"\x1b\\";
 const C1_ST: u8 = 0x9c;
@@ -79,10 +81,12 @@ pub struct TerminalInlineObjects {
 
 impl TerminalInlineObjects {
     /// Consumes PTY output and extracts inline object control sequences.
-    pub fn consume_pty_output<CB: Callbacks>(
+    pub fn consume_pty_output(
         &mut self,
         chunk: &[u8],
-        parser: &mut vt100::Parser<CB>,
+        runtime: &mut TerminalRuntime,
+        camera_updates: &mut Vec<TerminalCameraUpdate>,
+        terminal_output: &mut bool,
     ) -> Vec<Vec<u8>> {
         self.pending_bytes.extend_from_slice(chunk);
         let mut replies = Vec::new();
@@ -96,9 +100,8 @@ impl TerminalInlineObjects {
                 let pending_len = self.pending_bytes.len();
                 let keep_from = pending_apc_prefix_start(&self.pending_bytes, cursor);
                 if cursor < keep_from {
-                    parser.process(&normalize_hvp_sequences(
-                        &self.pending_bytes[cursor..keep_from],
-                    ));
+                    *terminal_output = true;
+                    runtime.process(&self.pending_bytes[cursor..keep_from]);
                 }
                 if keep_from < pending_len {
                     self.pending_bytes.drain(..keep_from);
@@ -109,7 +112,8 @@ impl TerminalInlineObjects {
             };
             let start = cursor + start_offset;
             if cursor < start {
-                parser.process(&normalize_hvp_sequences(&self.pending_bytes[cursor..start]));
+                *terminal_output = true;
+                runtime.process(&self.pending_bytes[cursor..start]);
             }
 
             let payload_start = start + APC_START.len();
@@ -118,13 +122,17 @@ impl TerminalInlineObjects {
                 return replies;
             };
             let sequence = self.pending_bytes[start..end].to_vec();
-            let (handled, reply) =
-                self.handle_apc_sequence(&sequence, parser.screen().cursor_position());
+            let (handled, reply) = self.handle_apc_sequence(
+                &sequence,
+                runtime.screen().cursor_position(),
+                camera_updates,
+            );
             if let Some(reply) = reply {
                 replies.push(reply);
             }
             if !handled {
-                parser.process(&sequence);
+                *terminal_output = true;
+                runtime.process(&sequence);
             }
             cursor = end;
         }
@@ -180,7 +188,7 @@ impl TerminalInlineObjects {
     }
 
     /// Refreshes placeholder-derived Kitty anchors.
-    pub fn refresh_placeholder_anchors(&mut self, screen: &vt100::Screen) {
+    pub fn refresh_placeholder_anchors(&mut self, screen: ScreenView<'_>) {
         if refresh_kitty_placeholder_anchors(&self.objects, &mut self.anchors, screen) {
             self.dirty = true;
         }
@@ -209,8 +217,9 @@ impl TerminalInlineObjects {
         &mut self,
         sequence: &[u8],
         cursor_position: (u16, u16),
+        camera_updates: &mut Vec<TerminalCameraUpdate>,
     ) -> (bool, Option<Vec<u8>>) {
-        if let Some(reply) = self.handle_rgp_sequence(sequence) {
+        if let Some(reply) = self.handle_rgp_sequence(sequence, camera_updates) {
             return (true, reply);
         }
 
@@ -278,10 +287,30 @@ impl TerminalInlineObjects {
         }
     }
 
-    fn handle_rgp_sequence(&mut self, sequence: &[u8]) -> Option<Option<Vec<u8>>> {
+    fn handle_rgp_sequence(
+        &mut self,
+        sequence: &[u8],
+        camera_updates: &mut Vec<TerminalCameraUpdate>,
+    ) -> Option<Option<Vec<u8>>> {
         let operation = consume_rgp_sequence(sequence)?;
         Some(match operation {
             RgpOperation::SupportQuery => Some(support_reply()),
+            RgpOperation::Camera {
+                camera_slot,
+                switch_immediately,
+                settings,
+            } => {
+                camera_updates.push(TerminalCameraUpdate {
+                    slot: camera_slot as usize,
+                    activate: switch_immediately,
+                    mode: settings.camera_type,
+                    scale: settings.scale,
+                    fov: settings.fov,
+                    translation: OptionalVec3::from(settings.offset),
+                    rotation_degrees: OptionalVec3::from(settings.rotation),
+                });
+                None
+            }
             RgpOperation::Register {
                 object_id,
                 format,
@@ -470,43 +499,6 @@ struct PendingRgpPayload {
     name: Option<String>,
     data: Vec<u8>,
     options: ObjectLoadOptions,
-}
-
-fn normalize_hvp_sequences(bytes: &[u8]) -> Cow<'_, [u8]> {
-    // vt100 handles CUP (`H`) but not HVP (`f`), so normalize cursor-positioning sequences.
-    let mut normalized = None;
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 2 < bytes.len() && bytes[i + 1] == b'[' {
-            let mut j = i + 2;
-            while j < bytes.len() && matches!(bytes[j], b'0'..=b'9' | b';') {
-                j += 1;
-            }
-
-            if j < bytes.len() && bytes[j] == b'f' && j > i + 2 {
-                let out = normalized.get_or_insert_with(|| {
-                    let mut out = Vec::with_capacity(bytes.len());
-                    out.extend_from_slice(&bytes[..i]);
-                    out
-                });
-                out.extend_from_slice(&bytes[i..j]);
-                out.push(b'H');
-                i = j + 1;
-                continue;
-            }
-        }
-
-        if let Some(out) = normalized.as_mut() {
-            out.push(bytes[i]);
-        }
-        i += 1;
-    }
-
-    match normalized {
-        Some(bytes) => Cow::Owned(bytes),
-        None => Cow::Borrowed(bytes),
-    }
 }
 
 fn pending_apc_prefix_start(bytes: &[u8], cursor: usize) -> usize {

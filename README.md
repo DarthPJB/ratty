@@ -120,21 +120,31 @@ Other useful cursor fields are:
 
 ## Key Bindings
 
-| Key                                             | Action               |
-| ----------------------------------------------- | -------------------- |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd>     | Copy selection       |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>     | Paste clipboard      |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> | Toggle 2D / 3D mode  |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd>     | Toggle Mobius mode   |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>    | Increase warp        |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Down</kbd>  | Decrease warp        |
-| <kbd>Alt</kbd>+<kbd>PageUp</kbd>                | Scroll one page up   |
-| <kbd>Alt</kbd>+<kbd>PageDown</kbd>              | Scroll one page down |
-| <kbd>Alt</kbd>+<kbd>Up</kbd>                    | Scroll one line up   |
-| <kbd>Alt</kbd>+<kbd>Down</kbd>                  | Scroll one line down |
-| <kbd>Ctrl</kbd>+<kbd>=</kbd>                    | Increase font size   |
-| <kbd>Ctrl</kbd>+<kbd>-</kbd>                    | Decrease font size   |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0</kbd>     | Reset font size      |
+| Key                                                            | Action               |
+| -------------------------------------------------------------- | -------------------- |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>                  | Copy selection       |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>                  | Paste clipboard      |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd>                | Toggle 2D / ortho 3D |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd>                    | Toggle perspective   |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd>                    | Toggle Mobius mode   |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>0-9</kbd> | Activate camera slot |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>                   | Increase warp        |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Down</kbd>                 | Decrease warp        |
+| <kbd>Alt</kbd>+<kbd>PageUp</kbd>                               | Scroll one page up   |
+| <kbd>Alt</kbd>+<kbd>PageDown</kbd>                             | Scroll one page down |
+| <kbd>Alt</kbd>+<kbd>Up</kbd>                                   | Scroll one line up   |
+| <kbd>Alt</kbd>+<kbd>Down</kbd>                                 | Scroll one line down |
+| <kbd>Ctrl</kbd>+<kbd>=</kbd>                                   | Increase font size   |
+| <kbd>Ctrl</kbd>+<kbd>-</kbd>                                   | Decrease font size   |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0</kbd>                    | Reset font size      |
+
+In custom configs, `ToggleOrtho3DMode` is the current action name for the
+orthographic 3D toggle. The old `Toggle3DMode` action remains supported as a
+backward-compatible alias.
+
+Camera slot actions are named `ActivateCameraSlot0` through
+`ActivateCameraSlot9`. The extra <kbd>Shift</kbd> modifier keeps slot 0 distinct
+from the existing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0</kbd> font reset.
 
 ## Inline 3D objects
 
@@ -146,6 +156,7 @@ RGP supports:
 - registering `.obj`, `.glb`, and `.stl` assets by path
 - placing them at terminal cell anchors
 - animation, scale, color, depth and other attributes
+- camera control for flat, orthographic, perspective and Mobius views
 
 There is a Ratatui widget called `ratatui-rgp` available in
 [`widget/`](widget/) if you want to build your own terminal applications that involve inline 3D objects.
@@ -154,7 +165,9 @@ There is a Ratatui widget called `ratatui-rgp` available in
 
 #### [Big rat](widget/examples/big_rat.rs)
 
-Places a single oversized rat directly in your terminal:
+Places a single oversized rat directly in your terminal. Press `v` in the demo
+to cycle the Ratty camera protocol through flat, orthographic, perspective and
+Mobius views.
 
 <div>
   <video width="80%" src="https://github.com/user-attachments/assets/e955d09a-d0eb-4bad-b3b2-fc1331f49646"/>
@@ -225,23 +238,34 @@ A blazingly fast serial monitor with plotter TUI and 3D telemetry
 ### Rendering pipeline
 
 The terminal surface currently uses [`ratatui`](https://github.com/ratatui/ratatui) for the UI buffer,
-[`parley_ratatui`](https://github.com/gold-silver-copper/parley_ratatui) for text shaping/rendering
+[`bevy_terminal_ratatui`](https://github.com/gold-silver-copper/bevy_terminal) for text shaping/rendering
 and [Bevy](https://bevyengine.org/) for scene presentation.
 
 Current workflow:
 
-1. PTY output is parsed by `vt100` and drawn into a Ratatui buffer on CPU
-2. `parley_ratatui` shapes the buffer with Parley and records it as a Vello scene
-3. The scene is handed to Bevy's render world through a double-buffered
-   exchange (scenes are recycled between frames, never cloned or re-recorded)
-4. Vello renders the scene on Bevy's render-world device into a plain
-   `Rgba8Unorm` storage texture, with no CPU readback in between
-5. That storage texture is copied into an `Rgba8UnormSrgb` present texture
-   (sampled through an sRGB view, so Vello's sRGB-encoded output is decoded on
-   sample instead of re-encoded), which Bevy presents in the 2D and 3D scenes
+1. PTY output is parsed by [`fux-vt`](https://github.com/gold-silver-copper/fux/tree/main/fux-vt), a bounded terminal engine shared with the [fux](https://github.com/gold-silver-copper/fux) multiplexer, and drawn into a Ratatui buffer on CPU
+2. `bevy_terminal_ratatui` translates Ratatui's changed cells into a retained terminal surface
+3. `bevy_terminal` shapes text with Bevy's font system and incrementally builds compact background,
+   decoration, cursor, and glyph quads
+4. Bevy's render world draws those quads into a renderer-owned `Rgba8UnormSrgb` texture
+5. Ratty presents that stable texture handle in its flat, plane, perspective, and Mobius scenes
 
 The terminal image is fully GPU-resident: the only data crossing from the main
-world to the render world each frame is the recorded scene, not pixels.
+world to the render world each frame is compact scene data, not pixels.
+
+### Workspace development
+
+The Cargo workspace contains the Ratty application. The widget remains a
+separate package under `widget/` with its own lockfile.
+
+```sh
+cargo test --workspace --locked     # Application tests and doctests
+```
+
+## Touchscreen
+
+In 3D mode, drag with one finger to rotate the terminal. Move two fingers together to pan, and
+pinch them to zoom. Swipe diagonally from the bottom-left toward the top-right to enter Mobius mode.
 
 ## Endorsements
 

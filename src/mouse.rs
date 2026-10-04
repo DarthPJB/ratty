@@ -4,20 +4,34 @@ use bevy::ecs::message::MessageReader;
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
 use bevy::input::mouse::{MouseButton, MouseButtonInput, MouseScrollUnit, MouseWheel};
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
-use bevy::window::{CursorMoved, PrimaryWindow, Window};
-use vt100::{MouseProtocolEncoding, MouseProtocolMode};
+use bevy::window::{CursorMoved, PrimaryWindow, Window, WindowFocused};
 
-use crate::config::AppConfig;
-use crate::runtime::TerminalRuntime;
-use crate::scene::{
-    MobiusTransition, TerminalPlaneView, TerminalPresentation, TerminalPresentationMode,
-    TerminalViewport,
+use crate::camera::{
+    MAX_PERSPECTIVE_FOV, MIN_ORTHOGRAPHIC_SCALE, MIN_PERSPECTIVE_FOV, TerminalCameraInteraction,
+    TerminalCameraSlots,
 };
+use crate::config::AppConfig;
+use crate::keyboard::enter_mobius_presentation;
+use crate::runtime::TerminalRuntime;
+use crate::scene::{MobiusTransition, TerminalPresentationMode, TerminalViewport};
 use crate::terminal::TerminalSurface;
+use fux_vt::{MouseProtocolEncoding, MouseProtocolMode};
+
+use crate::screen::ScreenView;
 
 /// Distance in pixels the pointer must move with a pending selection to start dragging.
 const SELECTION_DRAG_THRESHOLD: f32 = 4.0;
+
+/// Camera rotation applied per pixel of pointer movement.
+const ROTATION_SENSITIVITY: f32 = 0.005;
+
+/// Camera zoom applied per pixel of change between two fingers.
+const PINCH_ZOOM_SENSITIVITY: f32 = 0.002;
+
+/// Minimum corner-swipe travel as a fraction of the shorter window edge.
+const MOBIUS_SWIPE_FRACTION: f32 = 0.18;
 
 /// Active terminal text selection.
 #[derive(Resource, Clone, Default)]
@@ -41,6 +55,134 @@ pub(crate) struct ForwardedMouseState {
 #[derive(Default)]
 pub(crate) struct LocalScrollState {
     pixel_remainder: f32,
+}
+
+/// Camera movement produced by a touch event.
+#[derive(Debug, PartialEq)]
+enum TouchGesture {
+    Rotate(Vec2),
+    PanAndZoom { pan: Vec2, zoom: f32 },
+    EnterMobius,
+}
+
+/// Tracks up to two fingers used for camera gestures.
+#[derive(Default)]
+pub(crate) struct TouchGestureState {
+    primary: Option<(u64, Vec2)>,
+    secondary: Option<(u64, Vec2)>,
+    pinch_distance: Option<f32>,
+    mobius_swipe_start: Option<Vec2>,
+}
+
+impl TouchGestureState {
+    fn reset(&mut self) {
+        self.primary = None;
+        self.secondary = None;
+        self.pinch_distance = None;
+        self.mobius_swipe_start = None;
+    }
+
+    /// Updates the active gesture and returns its rotation or pinch movement.
+    fn update(
+        &mut self,
+        id: u64,
+        phase: TouchPhase,
+        position: Vec2,
+        window_size: Vec2,
+    ) -> Option<TouchGesture> {
+        match phase {
+            TouchPhase::Started => {
+                if self.primary.is_none() {
+                    self.primary = Some((id, position));
+                    let corner_size = mobius_swipe_threshold(window_size);
+                    if position.x <= corner_size && position.y >= window_size.y - corner_size {
+                        self.mobius_swipe_start = Some(position);
+                    }
+                } else if self.secondary.is_none()
+                    && self.primary.is_some_and(|(primary_id, _)| primary_id != id)
+                {
+                    self.secondary = Some((id, position));
+                    self.pinch_distance = self.finger_distance();
+                    self.mobius_swipe_start = None;
+                }
+                None
+            }
+            TouchPhase::Moved => {
+                let previous_primary = self.primary;
+                let previous_center = self.finger_center();
+                if self.primary.is_some_and(|(primary_id, _)| primary_id == id) {
+                    self.primary = Some((id, position));
+                } else if self
+                    .secondary
+                    .is_some_and(|(secondary_id, _)| secondary_id == id)
+                {
+                    self.secondary = Some((id, position));
+                } else {
+                    return None;
+                }
+
+                if self.secondary.is_none()
+                    && let Some(start) = self.mobius_swipe_start
+                {
+                    let travel = position - start;
+                    let threshold = mobius_swipe_threshold(window_size);
+                    if travel.x >= threshold && travel.y <= -threshold {
+                        self.reset();
+                        return Some(TouchGesture::EnterMobius);
+                    }
+
+                    // Reserve a valid corner swipe for the mode gesture rather
+                    // than rotating the camera underneath the user's finger.
+                    if travel.x >= -24.0 && travel.y <= 24.0 {
+                        return None;
+                    }
+                    self.mobius_swipe_start = None;
+                }
+
+                if let Some(distance) = self.finger_distance() {
+                    let zoom = self.pinch_distance.map(|last| distance - last);
+                    self.pinch_distance = Some(distance);
+                    zoom.zip(previous_center).and_then(|(zoom, center)| {
+                        self.finger_center().map(|next| TouchGesture::PanAndZoom {
+                            pan: next - center,
+                            zoom,
+                        })
+                    })
+                } else {
+                    previous_primary.map(|(_, last)| TouchGesture::Rotate(position - last))
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                if self
+                    .secondary
+                    .is_some_and(|(secondary_id, _)| secondary_id == id)
+                {
+                    self.secondary = None;
+                    self.pinch_distance = None;
+                } else if self.primary.is_some_and(|(primary_id, _)| primary_id == id) {
+                    self.primary = self.secondary.take();
+                    self.pinch_distance = None;
+                    self.mobius_swipe_start = None;
+                }
+                None
+            }
+        }
+    }
+
+    fn finger_distance(&self) -> Option<f32> {
+        Some(self.primary?.1.distance(self.secondary?.1))
+    }
+
+    fn finger_center(&self) -> Option<Vec2> {
+        Some((self.primary?.1 + self.secondary?.1) * 0.5)
+    }
+}
+
+fn mobius_swipe_threshold(window_size: Vec2) -> f32 {
+    window_size
+        .min_element()
+        .mul_add(MOBIUS_SWIPE_FRACTION, 0.0)
+        .clamp(72.0, 180.0)
 }
 
 /// Normalized selection bounds.
@@ -187,7 +329,11 @@ impl TerminalSelection {
     }
 
     /// Returns the selected screen text.
-    pub fn selected_text(&self, screen: &vt100::Screen) -> Option<String> {
+    ///
+    /// Kept hand-rolled rather than using the engine's `contents_between`:
+    /// ratty's selection is a plain rectangular row/column range driven by the
+    /// 3D viewport, and it must keep interior blank cells as spaces.
+    pub fn selected_text(&self, screen: ScreenView<'_>) -> Option<String> {
         let bounds = self.normalized_bounds()?;
 
         let (_, cols) = screen.size();
@@ -206,20 +352,22 @@ impl TerminalSelection {
                 cols.saturating_sub(1)
             };
 
-            for col in row_start..=row_end {
-                let Some(cell) = screen.cell(row, col) else {
-                    continue;
-                };
-                if cell.is_wide_continuation() {
-                    continue;
+            if let Some(grid_row) = screen.visible_row(row) {
+                for col in row_start..=row_end {
+                    let Some(cell) = grid_row.cell(usize::from(col)) else {
+                        break;
+                    };
+                    // The second half of a wide glyph is padding, not an
+                    // empty cell; a space there would split every CJK glyph.
+                    if cell.is_wide_continuation() {
+                        continue;
+                    }
+                    if cell.has_contents() {
+                        out.push_str(cell.contents());
+                    } else {
+                        out.push(' ');
+                    }
                 }
-
-                let symbol = if cell.has_contents() {
-                    cell.contents()
-                } else {
-                    " "
-                };
-                out.push_str(symbol);
             }
 
             if row != end_row {
@@ -241,31 +389,37 @@ pub struct MouseSystemParams<'w, 's> {
     runtime: ResMut<'w, TerminalRuntime>,
     terminal: Res<'w, TerminalSurface>,
     viewport: Res<'w, TerminalViewport>,
-    presentation: Res<'w, TerminalPresentation>,
-    mobius_transition: Res<'w, MobiusTransition>,
-    plane_view: ResMut<'w, TerminalPlaneView>,
+    camera_slots: ResMut<'w, TerminalCameraSlots>,
+    camera_interaction: ResMut<'w, TerminalCameraInteraction>,
+    mobius_transition: ResMut<'w, MobiusTransition>,
     selection: ResMut<'w, TerminalSelection>,
     redraw: ResMut<'w, crate::terminal::TerminalRedrawState>,
     app_config: Res<'w, AppConfig>,
 }
 
 /// Handles terminal mouse input.
+// Bevy systems take one parameter per resource; the touch-gesture state added
+// in #146 pushed this past clippy's threshold.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_mouse_input(
     mut cursor_events: MessageReader<CursorMoved>,
     mut button_events: MessageReader<MouseButtonInput>,
     mut wheel_events: MessageReader<MouseWheel>,
+    mut touch_events: MessageReader<TouchInput>,
+    mut focus_events: MessageReader<WindowFocused>,
     mut params: MouseSystemParams,
     mut forwarded_mouse: Local<ForwardedMouseState>,
     mut local_scroll: Local<LocalScrollState>,
+    mut touch_gesture: Local<TouchGestureState>,
 ) {
     let MouseSystemParams {
         primary_window,
         runtime,
         terminal,
         viewport,
-        presentation,
+        camera_slots,
+        camera_interaction,
         mobius_transition,
-        plane_view,
         selection,
         redraw,
         app_config,
@@ -273,13 +427,40 @@ pub(crate) fn handle_mouse_input(
     let Ok((primary_window, window)) = primary_window.single() else {
         return;
     };
+
     let window_size = window.resolution.size().max(Vec2::ONE);
-    let mouse_mode = runtime.parser.screen().mouse_protocol_mode();
-    let mouse_encoding = runtime.parser.screen().mouse_protocol_encoding();
-    let mobius_animating =
-        presentation.mode == TerminalPresentationMode::Mobius3d && mobius_transition.active;
-    let forward_mouse = presentation.mode == TerminalPresentationMode::Flat2d
-        && mouse_mode != MouseProtocolMode::None;
+    let mouse_mode = runtime.screen().mouse_protocol_mode();
+    let mouse_encoding = runtime.screen().mouse_protocol_encoding();
+
+    // Button releases delivered while the window is unfocused never reach the
+    // handlers below, so losing focus mid-drag would otherwise leave held
+    // button state re-arming on bare cursor movement after refocus.
+    for event in focus_events.read() {
+        if event.window == primary_window && !event.focused {
+            // The PTY application saw the press and will never see the real
+            // release, so synthesize one per held button before dropping the
+            // local state.
+            if mouse_mode != MouseProtocolMode::None
+                && let Some(cell) = forwarded_mouse.last_cell
+            {
+                for (pressed, code) in [
+                    (forwarded_mouse.left_pressed, 0),
+                    (forwarded_mouse.middle_pressed, 1),
+                    (forwarded_mouse.right_pressed, 2),
+                ] {
+                    if pressed {
+                        runtime.write_input(&encode_mouse_event(cell, code, true, mouse_encoding));
+                    }
+                }
+            }
+            release_pointer_drags(camera_interaction, selection, &mut forwarded_mouse);
+            touch_gesture.reset();
+        }
+    }
+    let mode = camera_slots.active().mode;
+    let mobius_animating = mode == TerminalPresentationMode::Mobius3d && mobius_transition.active;
+    let forward_mouse =
+        mode == TerminalPresentationMode::Flat2d && mouse_mode != MouseProtocolMode::None;
 
     for event in cursor_events.read() {
         if event.window != primary_window {
@@ -291,26 +472,21 @@ pub(crate) fn handle_mouse_input(
             continue;
         }
 
-        if matches!(
-            presentation.mode,
-            TerminalPresentationMode::Plane3d | TerminalPresentationMode::Mobius3d
-        ) {
-            if plane_view.rotating {
-                if let Some(last) = plane_view.last_rotate_cursor {
+        if mode.is_3d() {
+            if camera_interaction.rotating {
+                if let Some(last) = camera_interaction.last_rotate_cursor {
                     let delta = event.position - last;
-                    plane_view.yaw += delta.x * 0.005;
-                    plane_view.pitch -= delta.y * 0.005;
-                    redraw.request();
+                    let pose = &mut camera_slots.active_mut().pose;
+                    pose.yaw += delta.x * ROTATION_SENSITIVITY;
+                    pose.pitch -= delta.y * ROTATION_SENSITIVITY;
                 }
-                plane_view.last_rotate_cursor = Some(event.position);
-            } else if plane_view.panning {
-                if let Some(last) = plane_view.last_pan_cursor {
+                camera_interaction.last_rotate_cursor = Some(event.position);
+            } else if camera_interaction.panning {
+                if let Some(last) = camera_interaction.last_pan_cursor {
                     let delta = event.position - last;
-                    plane_view.camera_offset.x -= delta.x * plane_view.zoom;
-                    plane_view.camera_offset.y += delta.y * plane_view.zoom;
-                    redraw.request();
+                    apply_pan(&mut camera_slots.active_mut().pose, mode, delta);
                 }
-                plane_view.last_pan_cursor = Some(event.position);
+                camera_interaction.last_pan_cursor = Some(event.position);
             }
         } else if forward_mouse {
             if let Some(cell) = position_to_cell(event.position, window_size, viewport, terminal)
@@ -350,6 +526,31 @@ pub(crate) fn handle_mouse_input(
         }
     }
 
+    for event in touch_events.read() {
+        if event.window != primary_window {
+            continue;
+        }
+
+        match touch_gesture.update(event.id, event.phase, event.position, window_size) {
+            Some(TouchGesture::Rotate(delta)) if mode.is_3d() && !mobius_animating => {
+                let pose = &mut camera_slots.active_mut().pose;
+                pose.yaw += delta.x * ROTATION_SENSITIVITY;
+                pose.pitch -= delta.y * ROTATION_SENSITIVITY;
+            }
+            Some(TouchGesture::PanAndZoom { pan, zoom }) if mode.is_3d() && !mobius_animating => {
+                let pose = &mut camera_slots.active_mut().pose;
+                apply_pan(pose, mode, pan);
+                apply_wheel_zoom(pose, mode, mobius_animating, zoom * PINCH_ZOOM_SENSITIVITY);
+            }
+            Some(TouchGesture::EnterMobius) => {
+                enter_mobius_presentation(camera_slots, camera_interaction, mobius_transition);
+                selection.clear();
+            }
+            None => {}
+            _ => {}
+        }
+    }
+
     for event in button_events.read() {
         if event.window != primary_window {
             continue;
@@ -373,12 +574,9 @@ pub(crate) fn handle_mouse_input(
                         runtime.write_input(&encode_mouse_event(cell, 0, false, mouse_encoding));
                         forwarded_mouse.last_cell = Some(cell);
                     }
-                } else if matches!(
-                    presentation.mode,
-                    TerminalPresentationMode::Plane3d | TerminalPresentationMode::Mobius3d
-                ) {
-                    plane_view.rotating = true;
-                    plane_view.last_rotate_cursor = selection.cursor_position();
+                } else if mode.is_3d() {
+                    camera_interaction.rotating = true;
+                    camera_interaction.last_rotate_cursor = selection.cursor_position();
                 } else if let Some(pos) = selection.cursor_position()
                     && let Some(cell) = position_to_cell(pos, window_size, viewport, terminal)
                     && selection.begin_pending(cell, pos)
@@ -399,12 +597,9 @@ pub(crate) fn handle_mouse_input(
                         runtime.write_input(&encode_mouse_event(cell, 0, true, mouse_encoding));
                         forwarded_mouse.last_cell = Some(cell);
                     }
-                } else if matches!(
-                    presentation.mode,
-                    TerminalPresentationMode::Plane3d | TerminalPresentationMode::Mobius3d
-                ) {
-                    plane_view.rotating = false;
-                    plane_view.last_rotate_cursor = selection.cursor_position();
+                } else if mode.is_3d() {
+                    camera_interaction.rotating = false;
+                    camera_interaction.last_rotate_cursor = selection.cursor_position();
                 } else {
                     let _ = selection.end();
                 }
@@ -461,33 +656,19 @@ pub(crate) fn handle_mouse_input(
                     forwarded_mouse.last_cell = Some(cell);
                 }
             }
-            (MouseButton::Right, ButtonState::Pressed)
-                if matches!(
-                    presentation.mode,
-                    TerminalPresentationMode::Plane3d | TerminalPresentationMode::Mobius3d
-                ) =>
-            {
-                plane_view.panning = true;
-                plane_view.last_pan_cursor = selection.cursor_position();
+            (MouseButton::Right, ButtonState::Pressed) if mode.is_3d() => {
+                camera_interaction.panning = true;
+                camera_interaction.last_pan_cursor = selection.cursor_position();
             }
-            (MouseButton::Right, ButtonState::Released)
-                if matches!(
-                    presentation.mode,
-                    TerminalPresentationMode::Plane3d | TerminalPresentationMode::Mobius3d
-                ) =>
-            {
-                plane_view.panning = false;
-                plane_view.last_pan_cursor = selection.cursor_position();
+            (MouseButton::Right, ButtonState::Released) if mode.is_3d() => {
+                camera_interaction.panning = false;
+                camera_interaction.last_pan_cursor = selection.cursor_position();
             }
             _ => {}
         }
     }
 
     for event in wheel_events.read() {
-        if mobius_animating {
-            continue;
-        }
-
         let delta = match event.unit {
             MouseScrollUnit::Line => event.y * 0.1,
             MouseScrollUnit::Pixel => event.y * 0.001,
@@ -506,9 +687,7 @@ pub(crate) fn handle_mouse_input(
                     mouse_encoding,
                 ));
             }
-        } else if presentation.mode == TerminalPresentationMode::Flat2d
-            && !runtime.parser.screen().alternate_screen()
-        {
+        } else if mode == TerminalPresentationMode::Flat2d && !runtime.screen().alternate_screen() {
             let amount = match event.unit {
                 MouseScrollUnit::Line => {
                     app_config.terminal.mouse_scroll_lines as isize
@@ -524,20 +703,19 @@ pub(crate) fn handle_mouse_input(
             };
 
             if amount != 0 {
-                let screen = runtime.parser.screen_mut();
-                let current = screen.scrollback() as isize;
+                let current = runtime.scrollback() as isize;
                 let next = (current + amount).max(0) as usize;
-                screen.set_scrollback(next);
+                runtime.set_scrollback(next);
                 selection.clear();
                 redraw.request();
             }
-        } else if matches!(
-            presentation.mode,
-            TerminalPresentationMode::Plane3d | TerminalPresentationMode::Mobius3d
-        ) && delta != 0.0
-        {
-            plane_view.zoom = (plane_view.zoom - delta).clamp(0.1, 4.0);
-            redraw.request();
+        } else if mode.is_3d() && delta != 0.0 {
+            apply_wheel_zoom(
+                &mut camera_slots.active_mut().pose,
+                mode,
+                mobius_animating,
+                delta,
+            );
         }
     }
 }
@@ -609,4 +787,280 @@ fn position_to_cell(
         col.min(terminal.cols.saturating_sub(1) as u32),
         row.min(terminal.rows.saturating_sub(1) as u32),
     ))
+}
+
+/// Drops every drag-like state that waits on a button release.
+///
+/// Releases delivered while the window is unfocused go to the newly focused
+/// window instead, so held-button state must be cleared on focus loss: camera
+/// drags, an in-progress or pending text selection drag (the completed
+/// selection itself is kept), and forwarded mouse-protocol button state.
+/// This only clears local state; the caller synthesizes the release events
+/// the PTY application is still owed before invoking it. `last_cell` is also
+/// cleared so the first motion after refocus is never deduplicated away.
+fn release_pointer_drags(
+    camera_interaction: &mut TerminalCameraInteraction,
+    selection: &mut TerminalSelection,
+    forwarded_mouse: &mut ForwardedMouseState,
+) {
+    camera_interaction.reset();
+    selection.end();
+    forwarded_mouse.left_pressed = false;
+    forwarded_mouse.middle_pressed = false;
+    forwarded_mouse.right_pressed = false;
+    forwarded_mouse.last_cell = None;
+}
+
+/// Applies camera translation using the same movement as a right-button drag.
+fn apply_pan(
+    pose: &mut crate::camera::TerminalCameraPose,
+    mode: TerminalPresentationMode,
+    delta: Vec2,
+) {
+    let movement_scale = if mode == TerminalPresentationMode::Perspective3d {
+        pose.perspective_fov
+    } else {
+        pose.orthographic_scale
+    };
+    pose.translation.x -= delta.x * movement_scale;
+    pose.translation.y += delta.y * movement_scale;
+}
+
+/// Largest orthographic scale reachable by wheel zoom alone.
+const MAX_WHEEL_ORTHOGRAPHIC_SCALE: f32 = 4.0;
+
+/// Applies one wheel zoom step to an orthographic scale.
+///
+/// The protocol accepts any scale of at least [`MIN_ORTHOGRAPHIC_SCALE`], so a
+/// protocol-set scale above the interactive limit must not be yanked down to
+/// it by the first wheel tick; the wheel can only zoom back toward the range.
+fn wheel_zoomed_orthographic_scale(current: f32, delta: f32) -> f32 {
+    let max_scale = current.max(MAX_WHEEL_ORTHOGRAPHIC_SCALE);
+    (current - delta).clamp(MIN_ORTHOGRAPHIC_SCALE, max_scale)
+}
+
+/// Routes one wheel step to the projection value the mode displays.
+///
+/// Mobius shares the orthographic branch with Plane3d. Input is dropped while
+/// a Mobius transition animates: the transition owns the strip zoom until it
+/// finishes.
+fn apply_wheel_zoom(
+    pose: &mut crate::camera::TerminalCameraPose,
+    mode: TerminalPresentationMode,
+    mobius_animating: bool,
+    delta: f32,
+) {
+    if !mode.is_3d() || mobius_animating || delta == 0.0 {
+        return;
+    }
+    if mode == TerminalPresentationMode::Perspective3d {
+        pose.perspective_fov =
+            (pose.perspective_fov - delta).clamp(MIN_PERSPECTIVE_FOV, MAX_PERSPECTIVE_FOV);
+    } else {
+        pose.orthographic_scale = wheel_zoomed_orthographic_scale(pose.orthographic_scale, delta);
+    }
+}
+
+#[cfg(test)]
+mod wheel_zoom_tests {
+    use super::*;
+    use crate::camera::TerminalCameraPose;
+
+    #[test]
+    fn one_finger_rotates_and_two_fingers_pan_and_pinch() {
+        let mut state = TouchGestureState::default();
+        let window_size = Vec2::new(1000.0, 600.0);
+
+        assert_eq!(
+            state.update(7, TouchPhase::Started, Vec2::new(10.0, 20.0), window_size),
+            None
+        );
+        assert_eq!(
+            state.update(7, TouchPhase::Moved, Vec2::new(14.0, 17.0), window_size),
+            Some(TouchGesture::Rotate(Vec2::new(4.0, -3.0)))
+        );
+        assert_eq!(
+            state.update(8, TouchPhase::Started, Vec2::new(4.0, 17.0), window_size),
+            None
+        );
+        assert_eq!(
+            state.update(8, TouchPhase::Moved, Vec2::new(0.0, 17.0), window_size),
+            Some(TouchGesture::PanAndZoom {
+                pan: Vec2::new(-2.0, 0.0),
+                zoom: 4.0,
+            })
+        );
+
+        state.update(7, TouchPhase::Ended, Vec2::new(14.0, 17.0), window_size);
+        assert_eq!(state.primary, Some((8, Vec2::new(0.0, 17.0))));
+        assert_eq!(
+            state.update(8, TouchPhase::Moved, Vec2::new(3.0, 19.0), window_size),
+            Some(TouchGesture::Rotate(Vec2::new(3.0, 2.0)))
+        );
+    }
+
+    #[test]
+    fn bottom_left_swipe_enters_mobius() {
+        let mut state = TouchGestureState::default();
+        let window_size = Vec2::new(1000.0, 600.0);
+
+        state.update(1, TouchPhase::Started, Vec2::new(40.0, 560.0), window_size);
+        assert_eq!(
+            state.update(1, TouchPhase::Moved, Vec2::new(160.0, 440.0), window_size),
+            Some(TouchGesture::EnterMobius)
+        );
+        assert_eq!(state.primary, None);
+    }
+
+    #[test]
+    fn canceled_touch_rotation_can_restart() {
+        let mut state = TouchGestureState::default();
+        let window_size = Vec2::splat(500.0);
+        state.update(1, TouchPhase::Started, Vec2::ONE, window_size);
+        state.update(1, TouchPhase::Canceled, Vec2::ONE, window_size);
+        state.update(2, TouchPhase::Started, Vec2::new(3.0, 4.0), window_size);
+
+        assert_eq!(state.primary, Some((2, Vec2::new(3.0, 4.0))));
+        assert_eq!(state.secondary, None);
+    }
+
+    #[test]
+    fn focus_loss_releases_every_pointer_drag() {
+        let mut interaction = TerminalCameraInteraction {
+            rotating: true,
+            panning: true,
+            last_rotate_cursor: Some(Vec2::ONE),
+            last_pan_cursor: Some(Vec2::ONE),
+        };
+        let mut selection = TerminalSelection::default();
+        selection.begin(UVec2::new(2, 3));
+        let mut forwarded = ForwardedMouseState {
+            left_pressed: true,
+            middle_pressed: true,
+            right_pressed: true,
+            last_cell: Some(UVec2::ZERO),
+        };
+
+        release_pointer_drags(&mut interaction, &mut selection, &mut forwarded);
+
+        assert!(!interaction.rotating);
+        assert!(!interaction.panning);
+        assert_eq!(interaction.last_rotate_cursor, None);
+        assert!(!selection.dragging);
+        // The completed selection itself survives; only the drag is released.
+        assert!(selection.normalized_bounds().is_some());
+        assert!(!forwarded.left_pressed);
+        assert!(!forwarded.middle_pressed);
+        assert!(!forwarded.right_pressed);
+        assert_eq!(forwarded.last_cell, None);
+
+        let mut pending = TerminalSelection::default();
+        pending.begin_pending(UVec2::ZERO, Vec2::ZERO);
+        release_pointer_drags(&mut interaction, &mut pending, &mut forwarded);
+        assert_eq!(pending.pending_start, None);
+        assert!(!pending.update_from_cursor(UVec2::new(5, 5), Vec2::new(100.0, 100.0)));
+    }
+
+    #[test]
+    fn mobius_wheel_zoom_shares_the_orthographic_branch() {
+        let mut pose = TerminalCameraPose::default();
+        apply_wheel_zoom(&mut pose, TerminalPresentationMode::Mobius3d, false, 0.1);
+        assert_eq!(pose.orthographic_scale, 0.9);
+        assert_eq!(
+            pose.perspective_fov,
+            TerminalCameraPose::default().perspective_fov
+        );
+
+        let mut plane_pose = TerminalCameraPose::default();
+        apply_wheel_zoom(
+            &mut plane_pose,
+            TerminalPresentationMode::Plane3d,
+            false,
+            0.1,
+        );
+        assert_eq!(plane_pose.orthographic_scale, pose.orthographic_scale);
+
+        // While the Mobius transition animates, the wheel is ignored.
+        let before = pose;
+        apply_wheel_zoom(&mut pose, TerminalPresentationMode::Mobius3d, true, 0.1);
+        assert_eq!(pose, before);
+    }
+
+    #[test]
+    fn wheel_zoom_respects_the_protocol_scale_range() {
+        // A protocol-set scale above the interactive cap is not snapped down.
+        assert_eq!(wheel_zoomed_orthographic_scale(20.0, -0.1), 20.0);
+        // Zooming in from a large scale moves toward the view, not to 4.0.
+        assert_eq!(wheel_zoomed_orthographic_scale(20.0, 0.1), 19.9);
+        // Zooming in near the protocol minimum never zooms out instead.
+        let zoomed = wheel_zoomed_orthographic_scale(0.05, 0.1);
+        assert!(zoomed <= 0.05);
+        assert!(zoomed >= MIN_ORTHOGRAPHIC_SCALE);
+        // The ordinary interactive range still behaves as before.
+        assert_eq!(wheel_zoomed_orthographic_scale(1.0, 0.1), 0.9);
+        assert_eq!(wheel_zoomed_orthographic_scale(3.95, -0.1), 4.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use fux_vt::Parser;
+
+    fn terminal(rows: u16, cols: u16, input: &str) -> Parser {
+        let mut parser = Parser::new(rows, cols, 1000).expect("parser");
+        parser.process(input.as_bytes()).expect("process");
+        parser
+    }
+
+    fn view(parser: &Parser) -> ScreenView<'_> {
+        ScreenView::new(parser.screen(), 0)
+    }
+
+    fn select(start: (u32, u32), end: (u32, u32)) -> TerminalSelection {
+        let mut selection = TerminalSelection::default();
+        selection.begin(UVec2::new(start.0, start.1));
+        selection.update(UVec2::new(end.0, end.1));
+        selection
+    }
+
+    #[test]
+    fn selection_returns_the_drawn_text() {
+        let term = terminal(3, 20, "hello world");
+        let selection = select((0, 0), (10, 0));
+        assert_eq!(
+            selection.selected_text(view(&term)).as_deref(),
+            Some("hello world")
+        );
+    }
+
+    #[test]
+    fn selection_spans_multiple_rows() {
+        let term = terminal(3, 20, "first\r\nsecond");
+        let selection = select((0, 0), (5, 1));
+        assert_eq!(
+            selection.selected_text(view(&term)).as_deref(),
+            Some("first\nsecond")
+        );
+    }
+
+    #[test]
+    fn selection_preserves_wide_characters_and_combining_marks() {
+        let term = terminal(3, 20, "你好e\u{0301}z");
+        let selection = select((0, 0), (5, 0));
+        assert_eq!(
+            selection.selected_text(view(&term)).as_deref(),
+            Some("你好e\u{0301}z")
+        );
+    }
+
+    #[test]
+    fn selection_without_a_drag_is_empty() {
+        let term = terminal(3, 20, "hello");
+        assert_eq!(
+            TerminalSelection::default().selected_text(view(&term)),
+            None
+        );
+    }
 }

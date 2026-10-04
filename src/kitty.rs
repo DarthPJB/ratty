@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use base64::Engine as _;
 
 use crate::inline::{InlineAnchor, InlineObject, InlineStyle, KittyInlineObject, RasterObject};
+use fux_vt::Color;
+
+use crate::screen::{KITTY_PLACEHOLDER, ScreenView};
 
 /// Kitty graphics APC prefix.
 pub const KITTY_APC_START: &[u8] = b"\x1b_G";
@@ -247,7 +250,7 @@ impl KittyTransfer {
                     return None;
                 }
                 let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
-                for rgb in self.bytes.chunks_exact(3) {
+                for rgb in self.bytes.as_chunks::<3>().0 {
                     rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
                 }
                 (width, height, rgba)
@@ -273,11 +276,11 @@ impl KittyTransfer {
     }
 }
 
-/// Refreshes placeholder-backed Kitty anchors from the VT100 screen.
+/// Refreshes placeholder-backed Kitty anchors from the terminal grid.
 pub fn refresh_kitty_placeholder_anchors(
     objects: &HashMap<u32, InlineObject>,
     anchors: &mut HashMap<u32, InlineAnchor>,
-    screen: &vt100::Screen,
+    screen: ScreenView<'_>,
 ) -> bool {
     let placeholder_ids = objects
         .iter()
@@ -297,14 +300,19 @@ pub fn refresh_kitty_placeholder_anchors(
     let mut bounds = HashMap::<u32, (u16, u16, u16, u16)>::new();
     let (rows, cols) = screen.size();
     for row in 0..rows {
+        let Some(grid_row) = screen.visible_row(row) else {
+            continue;
+        };
         for col in 0..cols {
-            let Some(cell) = screen.cell(row, col) else {
-                continue;
+            let Some(cell) = grid_row.cell(usize::from(col)) else {
+                break;
             };
-            if !cell.contents().starts_with('\u{10EEEE}') {
+            // Placeholders may carry combining diacritics that encode the
+            // image row and column, so match on the base character.
+            if !cell.contents().starts_with(KITTY_PLACEHOLDER) {
                 continue;
             }
-            let vt100::Color::Rgb(r, g, b) = cell.fgcolor() else {
+            let Color::Rgb(r, g, b) = cell.fgcolor() else {
                 continue;
             };
             let placeholder_id = ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);

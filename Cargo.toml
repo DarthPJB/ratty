@@ -1,3 +1,8 @@
+[workspace]
+members = ["."]
+exclude = ["widget"]
+resolver = "3"
+
 [package]
 name = "ratty"
 version = "0.5.0"
@@ -5,12 +10,11 @@ description = "A GPU-rendered terminal emulator that supports inline 3D graphics
 authors = ["Orhun Parmaksız <orhunparmaksiz@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/orhun/ratty"
 repository = "https://github.com/orhun/ratty"
 keywords = ["terminal", "emulator", "3d", "graphics"]
 categories = ["command-line-utilities", "graphics"]
 edition = "2024"
-exclude = ["website/**", ".github/**", "widget/**"]
+exclude = ["website/**", ".github/**", "widget/**", "scratchpad/**"]
 
 [dependencies]
 anyhow = "1.0"
@@ -27,10 +31,12 @@ bevy = { version = "0.19.0", default-features = false, features = [
     "bevy_scene",
     "bevy_sprite",
     "bevy_sprite_render",
+    "bevy_text",
     "bevy_winit",
     "gltf_animation",
     "keyboard",
     "mouse",
+    "touch",
     "multi_threaded",
     "png",
     "reflect_auto_register",
@@ -41,8 +47,9 @@ bevy = { version = "0.19.0", default-features = false, features = [
 ] }
 clap = { version = "4.5", features = ["derive"] }
 etcetera = "0.11"
+fux-vt = "0.2.0"
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
-parley_ratatui = "0.3.4"
+bevy_terminal_ratatui = { version = "0.8.1", default-features = false, features = ["system_fonts"] }
 portable-pty = "0.8"
 ratatui = "0.30"
 rust-embed = "8.5"
@@ -51,7 +58,6 @@ shellexpand = "3.1"
 stl_io = "0.11.0"
 tobj = "4.0"
 toml = "0.8"
-vt100 = "0.16"
 winit = { version = "0.30", default-features = false }
 
 [build-dependencies]
@@ -73,3 +79,11 @@ opt-level = 3
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+# Optimized builds for day-to-day development: skips LTO and splits codegen
+# so rebuilds after an edit take seconds instead of minutes.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
